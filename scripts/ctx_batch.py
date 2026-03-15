@@ -96,8 +96,14 @@ def main():
 
     # Parse commands
     if args.pipeline:
+        # SECURITY: Restrict pipeline files to within the OpenClaw workspace
+        pipeline_path = os.path.realpath(args.pipeline)
+        allowed_dir = os.path.realpath(os.path.join(OPENCLAW_HOME, "workspace"))
+        if not pipeline_path.startswith(allowed_dir + os.sep) and pipeline_path != allowed_dir:
+            print(json.dumps({"success": False, "error": "Pipeline file must be within the workspace directory"}))
+            sys.exit(1)
         try:
-            with open(args.pipeline, "r") as f:
+            with open(pipeline_path, "r") as f:
                 pipeline = json.load(f)
             specs = []
             for step in pipeline.get("steps", []):
@@ -108,7 +114,7 @@ def main():
                     spec["fields"] = step["fields"]
                 specs.append(spec)
         except (json.JSONDecodeError, FileNotFoundError) as e:
-            print(json.dumps({"success": False, "error": f"Failed to load pipeline: {e}"}))
+            print(json.dumps({"success": False, "error": "Failed to load pipeline file"}))
             sys.exit(1)
     else:
         try:

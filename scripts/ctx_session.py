@@ -15,7 +15,7 @@ import time
 
 OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
 DB_PATH = os.path.join(OPENCLAW_HOME, "context/sessions.db")
-SNAPSHOT_BUDGET = int(os.environ.get("CTX_SNAPSHOT_BUDGET", "2048"))
+SNAPSHOT_BUDGET = max(256, min(int(os.environ.get("CTX_SNAPSHOT_BUDGET", "2048")), 65536))
 
 # Priority levels with budget allocation percentages
 PRIORITIES = {

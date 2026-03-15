@@ -57,15 +57,21 @@ def load_env():
 # Backend implementations
 # ─────────────────────────────────────────────
 
+def _validate_phone(number):
+    """Validate phone number format (E.164: +countrycode then 7-14 digits)."""
+    import re
+    return bool(number and re.match(r'^\+[1-9]\d{7,14}$', number))
+
+
 def send_imessage(to, text, env):
     """Send via imsg CLI."""
     imsg = shutil.which("imsg") or "/opt/homebrew/bin/imsg"
     if not os.path.isfile(imsg):
         return False, "imsg CLI not found"
 
-    # Validate phone number format
-    if not to or not to.startswith("+"):
-        return False, f"Invalid phone number format: {to} (must start with +)"
+    # SECURITY: Validate phone number with strict E.164 pattern
+    if not _validate_phone(to):
+        return False, f"Invalid phone number format (must be E.164: +1XXXXXXXXXX)"
 
     try:
         result = subprocess.run(

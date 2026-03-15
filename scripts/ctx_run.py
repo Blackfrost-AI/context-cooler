@@ -253,21 +253,33 @@ def _redact_secrets(text):
     return result
 
 
+MAX_INDEX_CONTENT = 100_000  # 100 KB per entry
+MAX_INDEX_ROWS = 10_000  # Prune oldest entries beyond this
+
+
 def index_output(conn, skill, command, content, timestamp):
     """Index the full output in FTS5 for later search.
 
-    Content is redacted for secrets before indexing to prevent
-    sensitive data (API keys, tokens) from leaking into the search index.
+    Content is redacted for secrets and truncated before indexing.
+    Old entries are pruned to prevent unbounded database growth.
     """
     try:
         safe_content = _redact_secrets(content)
+        if len(safe_content) > MAX_INDEX_CONTENT:
+            safe_content = safe_content[:MAX_INDEX_CONTENT] + "\n[TRUNCATED]"
         conn.execute(
             "INSERT INTO fts_index (skill, command, content, timestamp) VALUES (?, ?, ?, ?)",
             (skill, command, safe_content, timestamp),
         )
+        # Prune old entries to prevent unbounded growth
+        conn.execute(
+            "DELETE FROM fts_index WHERE rowid IN "
+            "(SELECT rowid FROM fts_index ORDER BY rowid DESC LIMIT -1 OFFSET ?)",
+            (MAX_INDEX_ROWS,),
+        )
         conn.commit()
-    except Exception:
-        pass  # FTS indexing is best-effort
+    except Exception as e:
+        print(f"Warning: FTS indexing failed: {e}", file=sys.stderr)
 
 
 def record_stats(conn, skill, command, intent, raw_bytes, summary_bytes, timestamp):
