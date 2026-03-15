@@ -6,7 +6,7 @@ No other tool does this. Every AI agent framework — AutoGPT, CrewAI, LangChain
 
 Your agent calls an API skill and gets back 3-50 KB of raw JSON. It needed 120 bytes. The rest? Wasted tokens burning through your context window. Every single call. Every single day. That's thousands of dollars in unnecessary API costs for production agent systems.
 
-Context Saver is **the first purpose-built context optimization layer for AI agents**. It fixes this with three mechanisms: **sandboxed execution**, **intent-driven filtering**, and **session continuity** — all in pure Python with no external dependencies.
+Context Saver is **the first purpose-built context optimization layer for AI agents**. It fixes this with four mechanisms: **sandboxed execution**, **intent-driven filtering**, **compact-by-default skills**, and **session continuity** — all in pure Python with no external dependencies.
 
 > **Why does this matter?** Because context windows are the #1 bottleneck for autonomous AI agents. Models get slower, dumber, and more expensive as context fills up. Every framework talks about RAG and embeddings for *retrieval* — but nobody optimized what goes *into* the context in the first place. Until now.
 
@@ -31,6 +31,113 @@ WITH Context Saver:
 
   Daily token burn: ~200,000 tokens (73% reduction)
 ```
+
+---
+
+## What's New in v2.0
+
+### Compact-by-Default Skills
+The #1 lesson from production: **agents don't follow instructions.** They ignore `--summary` flags, skip wrapper scripts, and call skills directly. The only reliable fix is making compact output the default at the source.
+
+Skills now return minimal fields by default. `--verbose` is required for full output:
+
+```bash
+# Default: compact (3 fields per position, 83% smaller)
+alpaca_cli.py positions
+→ {"count":8,"positions":[{"s":"AAPL","qty":"100","pnl":"1500.00"},...]}
+
+# Verbose: full output (only when you actually need all fields)
+alpaca_cli.py --verbose positions
+→ {"count":8,"positions":[{"symbol":"AAPL","qty":"100","side":"long","market_value":"18500",...}]}
+```
+
+ctx_run.py automatically injects `--verbose` so it gets the full data to filter against, reporting accurate 70-84% savings.
+
+### Multi-Messenger Delivery
+`deliver.py` — unified delivery backend for pipelines. Auto-detects available backend:
+
+| Backend | Requirement | Usage |
+|---------|------------|-------|
+| **iMessage** | `imsg` CLI installed (macOS) | `--to +17025551234` |
+| **Telegram** | `TELEGRAM_BOT_TOKEN` env var | `--to <chat_id>` |
+| **Slack** | `SLACK_WEBHOOK_URL` env var | `--backend slack` |
+| **Discord** | `DISCORD_WEBHOOK_URL` env var | `--backend discord` |
+
+```bash
+# Auto-detect backend
+python3 deliver.py --to +17025551234 --text "Your morning brief"
+
+# Force specific backend
+python3 deliver.py --backend telegram --to 5328771204 --text "Alert!"
+
+# Pipe from stdin
+echo "Hello" | python3 deliver.py --to +17025551234
+```
+
+### Zero-Token Pipelines (launchd)
+For deterministic tasks like morning briefs, **bypass the LLM entirely**:
+
+```bash
+# Self-contained: gather data → format brief → deliver via iMessage/Telegram/Slack
+python3 morning_brief_pipeline.py --to +17025551234 --detailed
+
+# Preview without sending
+python3 morning_brief_pipeline.py --print-only --detailed
+
+# JSON output for pipeline consumers
+python3 morning_brief_pipeline.py --json
+```
+
+Schedule via macOS launchd for **zero LLM tokens consumed**:
+```xml
+<!-- ~/Library/LaunchAgents/com.openclaw.morning-brief.plist -->
+<plist version="1.0">
+<dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/python3</string>
+    <string>morning_brief_pipeline.py</string>
+    <string>--to</string><string>+17025551234</string>
+    <string>--detailed</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>6</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+</dict>
+</plist>
+```
+
+### Security Hardened
+All scripts audited and patched (14 findings addressed):
+- **Command injection** — `shell=False` + `shlex.split()` (no string concatenation)
+- **Path traversal** — Skill names validated with `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`
+- **Secret leakage** — API keys/tokens redacted before FTS5 indexing
+- **Pipeline path restriction** — `--pipeline` files must be within workspace
+- **Phone validation** — E.164 format enforced for iMessage delivery
+- **Index size cap** — 100KB per entry, 10K max rows with automatic pruning
+- **Snapshot budget clamped** — 256-65536 byte range enforced
+- **No shell=True anywhere** — All subprocess calls use list-based args
+- **Parameterized SQL everywhere** — Zero SQL injection vectors
+- **stdlib only** — No third-party dependencies = no supply chain risk
+
+---
+
+## Production Results
+
+Measured on a live OpenClaw instance running 8 positions, 20-symbol movers, daily briefs:
+
+| Call | Raw (verbose) | After ctx_run filter | Savings |
+|------|--------------|---------------------|---------|
+| `account` | 357B | 95B | **73.4%** |
+| `positions` (8 holdings) | 2,739B | 822B | **70.0%** |
+| `movers` (20 symbols) | 2,284B | 367B | **83.9%** |
+| **Pipeline total** | **5,380B** | **1,284B** | **76.1%** |
+
+Morning brief pipeline: **zero LLM tokens** (launchd → Python → iMessage, no agent involved).
+
+Before context-saver, a single morning brief cron job consumed **150K-369K tokens** (agent loading workspace files + raw API dumps). After: **0 tokens**.
 
 ---
 
@@ -104,14 +211,12 @@ Then follow the [Wiring Into Your Agent](#wiring-into-your-agent-important) sect
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCLAW_HOME` | `~/.openclaw` | Root directory for your OpenClaw instance |
-| `CTX_SNAPSHOT_BUDGET` | `2048` | Max bytes for session snapshots (adjustable) |
+| `CTX_SNAPSHOT_BUDGET` | `2048` | Max bytes for session snapshots (256-65536) |
 | `CTX_FTS_ENABLED` | `1` | Set to `0` to disable FTS5 indexing |
-
-If your OpenClaw home directory is somewhere other than `~/.openclaw`, set it:
-
-```bash
-export OPENCLAW_HOME=/path/to/your/openclaw
-```
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for deliver.py |
+| `TELEGRAM_CHAT_ID` | — | Default Telegram chat ID |
+| `SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL |
+| `DISCORD_WEBHOOK_URL` | — | Discord webhook URL |
 
 ---
 
@@ -148,6 +253,24 @@ Or use batch mode for multiple calls in one shot:
   ]'
 ```
 
+### For Deterministic Tasks (Best Approach)
+
+**Don't use an agent at all.** For tasks like morning briefs that don't need reasoning, use a self-contained pipeline script scheduled via launchd/cron:
+
+```bash
+# Zero tokens — pure Python pipeline
+python3 morning_brief_pipeline.py --to +17025551234 --to +17025559876 --detailed
+```
+
+This is the most reliable approach. We proved through testing that agents burn 150K-369K tokens on morning briefs even when explicitly told to use ctx_run.py — they read SKILL.md and call skills directly, ignoring wrapper instructions.
+
+### The Key Insight
+
+> **Agents can't be trusted to follow instructions about tool usage.** The only reliable approaches are:
+> 1. **Compact-by-default** — Skills return minimal output regardless of how they're called
+> 2. **Pipeline scripts** — Bypass the agent entirely for deterministic tasks
+> 3. **ctx_run.py** — For agent-driven tasks, wrap calls and inject `--verbose` automatically
+
 ### Real-World Impact
 
 We measured a 24-hour period on a production OpenClaw instance **without** context-saver wired in:
@@ -160,21 +283,30 @@ We measured a 24-hour period on a production OpenClaw instance **without** conte
 | Morning brief #2 (7 messages) | 130,548 | $0.139 |
 | **Daily Total** | **2,356,572** | **$1.70** |
 
-After wiring context-saver into the morning briefs and EOD workflow, the morning briefs dropped from ~150K tokens to ~40K tokens each — **a 73% reduction** just from filtering Alpaca API responses.
-
-### The Key Rule
-
-**If a skill returns JSON, wrap it in `ctx_run.py`.** The only exceptions are tiny outputs (<500 bytes) where filtering adds overhead.
+After context-saver v2.0: morning briefs dropped to **0 tokens** (launchd pipeline), data calls in chat compressed by 70-84%.
 
 ---
 
 ## How It Works
 
-Context Saver has three layers that work together:
+Context Saver has four layers that work together:
 
-### Layer 1: Sandboxed Execution
+### Layer 1: Compact-by-Default Skills
 
-Skill commands run in **isolated subprocesses**. The full output is captured but never returned to the context window. Instead, a compact summary (100-500 bytes) is sent back while the full output gets indexed in SQLite FTS5 for on-demand retrieval.
+Skills return minimal output by default. `--verbose` required for full dump. This is the **only approach that reliably saves tokens** because it works even when agents ignore all other instructions.
+
+```python
+# In your skill CLI:
+parser.add_argument("--summary", default=True)
+parser.add_argument("--verbose", action="store_true")
+
+# Default output: {"s": "AAPL", "qty": "100", "pnl": "1500"}
+# Verbose output: {"symbol": "AAPL", "qty": "100", "side": "long", "market_value": "18500", ...}
+```
+
+### Layer 2: Sandboxed Execution with Verbose Injection
+
+ctx_run.py automatically injects `--verbose` into skill commands, gets the full output, applies intent-driven filtering, and returns a compact summary. The full output is indexed in FTS5 but never enters the context window.
 
 ```bash
 # Without Context Saver: raw 3 KB JSON enters context
@@ -184,7 +316,7 @@ python3 skills/my-api/scripts/cli.py dashboard
 python3 skills/context-saver/scripts/ctx_run.py --skill my-api --cmd "dashboard"
 ```
 
-### Layer 2: Intent-Driven Filtering
+### Layer 3: Intent-Driven Filtering
 
 Pass an `--intent` string and Context Saver extracts only the fields that match your question. Uses fast keyword scoring against JSON keys and values — no ML, no embeddings, no latency.
 
@@ -192,14 +324,16 @@ Pass an `--intent` string and Context Saver extracts only the fields that match 
 # Returns only fields related to errors (3 fields instead of 40+)
 python3 scripts/ctx_run.py --skill my-api --cmd "dashboard" --intent "check error rate"
 
-# Returns only items with failing status
-python3 scripts/ctx_run.py --skill my-api --cmd "list-services" --intent "find failures"
+# Returns only losing positions
+python3 scripts/ctx_run.py --skill alpaca-trader --cmd "positions" --intent "find losing"
 
-# Or use explicit field selection for precision
-python3 scripts/ctx_run.py --skill my-api --cmd "dashboard" --fields "active_users,error_rate,uptime"
+# Compact summary with all items
+python3 scripts/ctx_run.py --skill alpaca-trader --cmd "positions" --intent "summary 20"
 ```
 
-### Layer 3: Session Continuity
+Smart handling of API wrapper dicts: `{"count": 8, "positions": [...]}` — automatically unwraps, recurses into the nested list, and filters each item.
+
+### Layer 4: Session Continuity
 
 Critical events are logged to SQLite with priority levels (P1-P4). Before conversation compaction wipes your context, a **2 KB snapshot** captures everything that matters. On resume, the snapshot restores full operational context without re-fetching anything.
 
@@ -240,13 +374,13 @@ python3 scripts/ctx_run.py --skill my-api --cmd "dashboard" --raw
 ```json
 {
   "success": true,
-  "skill": "my-api",
-  "command": "dashboard",
-  "summary": {"active_users": 12543, "error_rate": 0.02, "uptime": "99.98%"},
-  "raw_bytes": 3072,
-  "summary_bytes": 85,
-  "bytes_saved": 2987,
-  "savings_pct": 97.2
+  "skill": "alpaca-trader",
+  "command": "positions",
+  "summary": {"count": 8, "positions": [{"symbol": "AAPL", "qty": "100", "unrealized_pl": "1500"}]},
+  "raw_bytes": 2739,
+  "summary_bytes": 822,
+  "bytes_saved": 1917,
+  "savings_pct": 70.0
 }
 ```
 
@@ -262,26 +396,48 @@ python3 scripts/ctx_batch.py --commands '[
 ]'
 ```
 
-**Output format:**
-
-```json
-{
-  "success": true,
-  "commands_run": 3,
-  "commands_succeeded": 3,
-  "commands_failed": 0,
-  "total_raw_bytes": 15360,
-  "total_summary_bytes": 1240,
-  "total_bytes_saved": 14120,
-  "total_savings_pct": 91.9,
-  "results": [...]
-}
-```
-
 You can also load from a pipeline file:
 
 ```bash
 python3 scripts/ctx_batch.py --pipeline examples/daily-status-pipeline.json
+```
+
+### Multi-Messenger Delivery
+
+```bash
+# iMessage (auto-detected on macOS with imsg CLI)
+python3 scripts/deliver.py --to +17025551234 --text "Morning brief ready"
+
+# Telegram
+python3 scripts/deliver.py --backend telegram --to 5328771204 --text "Alert!"
+
+# Slack webhook
+python3 scripts/deliver.py --backend slack --text "Daily report attached"
+
+# Discord webhook
+python3 scripts/deliver.py --backend discord --text "System status update"
+
+# Pipe from stdin
+echo "Hello from pipeline" | python3 scripts/deliver.py --to +17025551234
+```
+
+### Morning Brief Pipeline
+
+```bash
+# Full pipeline: gather → filter → format → deliver (zero LLM tokens)
+python3 scripts/morning_brief_pipeline.py --to +17025551234 --detailed
+
+# Multiple recipients
+python3 scripts/morning_brief_pipeline.py --to +17025551234 --to +17025559876
+
+# Preview without sending
+python3 scripts/morning_brief_pipeline.py --print-only --detailed
+
+# JSON output for downstream processing
+python3 scripts/morning_brief_pipeline.py --json
+
+# Choose delivery backend
+python3 scripts/morning_brief_pipeline.py --to 5328771204 --backend telegram
 ```
 
 ### Search Indexed Data
@@ -311,9 +467,6 @@ python3 scripts/ctx_session.py log --type "deploy" --priority critical \
 python3 scripts/ctx_session.py log --type "alert" --priority high \
   --data '{"service":"cache","msg":"memory at 92%"}'
 
-python3 scripts/ctx_session.py log --type "analysis" --priority medium \
-  --data '{"result":"stable","anomalies":0}'
-
 # Snapshot before compaction
 python3 scripts/ctx_session.py snapshot
 
@@ -333,8 +486,6 @@ python3 scripts/ctx_session.py stats
 | `medium` | P3 | 20% of 2 KB | Analysis results, routine checks |
 | `low` | P4 | 10% of 2 KB | Info queries, status checks |
 
-The snapshot builder allocates budget by priority, ensuring critical events are **always** preserved even when the 2 KB limit is tight.
-
 ### View Stats
 
 ```bash
@@ -347,33 +498,30 @@ Shows total bytes saved, number of runs, average compression ratio, top skills b
 
 ## Benchmarks
 
-![Before vs After Data Breakdown](docs/savings-breakdown.png)
-
 | Operation | Without | With Context Saver | Savings |
 |-----------|---------|--------------------|---------|
-| Single API query (40+ fields) | 3 KB | 120 B | **96%** |
-| List endpoint (50 records) | 5 KB | 300 B | **94%** |
-| Search results (200 hits) | 20-50 KB | 500 B | **97%** |
-| Multi-skill pipeline (4 calls) | 23 KB | 2 KB (1 batch) | **91%** |
-| Session cold start after compaction | 20 KB | 2 KB snapshot | **90%** |
+| Account query (12 fields) | 357 B | 95 B | **73%** |
+| Positions (8 holdings, 10 fields each) | 2,739 B | 822 B | **70%** |
+| Market movers (20 symbols) | 2,284 B | 367 B | **84%** |
+| Search results (10 tweets, 12 fields each) | ~4 KB | ~1 KB | **75%** |
+| Multi-skill pipeline (3 calls) | 5,380 B | 1,284 B | **76%** |
+| Morning brief (agent-based) | 150K-369K tokens | 0 tokens | **100%** |
 | Full day of agent operation | ~750K tokens | ~200K tokens | **73%** |
-
-See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for detailed methodology and scenario breakdowns.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  Claude Context Window               │
-│                                                     │
-│   ┌──────────┐   ┌──────────┐   ┌──────────┐      │
-│   │  120 B   │   │  300 B   │   │   2 KB   │      │
-│   │ summary  │   │ filtered │   │ snapshot │      │
-│   └────┬─────┘   └────┬─────┘   └────┬─────┘      │
-│        │              │              │             │
-└────────┼──────────────┼──────────────┼─────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                  Claude Context Window                    │
+│                                                          │
+│   ┌──────────┐   ┌──────────┐   ┌──────────┐           │
+│   │  120 B   │   │  300 B   │   │   2 KB   │           │
+│   │ summary  │   │ filtered │   │ snapshot │           │
+│   └────┬─────┘   └────┬─────┘   └────┬─────┘           │
+│        │              │              │                  │
+└────────┼──────────────┼──────────────┼──────────────────┘
          │              │              │
    ┌─────┴──────────────┴──────────────┴──────┐
    │           Context Saver Layer             │
@@ -381,11 +529,13 @@ See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for detailed methodology and scenar
    │  ┌──────────┐ ┌──────────┐ ┌──────────┐  │
    │  │ Sandbox  │ │  Intent  │ │ Session  │  │
    │  │ Runner   │ │  Filter  │ │ Tracker  │  │
+   │  │ +verbose │ │ +unwrap  │ │ +budget  │  │
    │  └────┬─────┘ └────┬─────┘ └────┬─────┘  │
    │       │            │            │         │
    │  ┌────┴────────────┴────────────┴────┐    │
-   │  │    SQLite FTS5 Index + Stats      │    │
-   │  │    (~/.openclaw/context/*.db)     │    │
+   │  │  SQLite FTS5 Index + Stats        │    │
+   │  │  Secret redaction before indexing  │    │
+   │  │  100KB cap + 10K row pruning      │    │
    │  └───────────────────────────────────┘    │
    └───────────────────────────────────────────┘
          │              │              │
@@ -396,37 +546,71 @@ See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for detailed methodology and scenar
         Skill Subprocesses (never enter context)
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed data flow diagrams, SQLite schemas, and the snapshot budget allocation algorithm.
+### Zero-Token Pipeline Architecture
+
+```
+┌───────────┐     ┌───────────┐     ┌───────────┐     ┌───────────┐
+│  launchd  │────▶│ pipeline  │────▶│ ctx_run   │────▶│ deliver   │
+│ (schedule)│     │ .py       │     │ .py       │     │ .py       │
+└───────────┘     └───────────┘     └───────────┘     └───────────┘
+                       │                  │                  │
+                       │            ┌─────┴─────┐     ┌─────┴─────┐
+                       │            │ --verbose  │     │ iMessage  │
+                       │            │ injection  │     │ Telegram  │
+                       │            │ + filter   │     │ Slack     │
+                       │            └───────────┘     │ Discord   │
+                       │                              └───────────┘
+                  No LLM involved.
+                  Zero tokens consumed.
+```
+
+---
+
+## Security
+
+Context Saver was audited before open-sourcing. All user-controlled inputs are validated:
+
+| Vector | Protection |
+|--------|-----------|
+| Command injection | `shell=False` + `shlex.split()`, no string concatenation |
+| Path traversal | Skill names validated: `^[a-zA-Z0-9][a-zA-Z0-9_-]*$` |
+| Secret leakage | API keys/tokens redacted before FTS5 indexing |
+| SQL injection | Parameterized queries everywhere, zero string concatenation |
+| Pipeline escape | `--pipeline` restricted to workspace directory |
+| Phone injection | E.164 format validation for iMessage delivery |
+| DoS via index growth | 100KB per entry cap, 10K row limit with auto-pruning |
+| Env var injection | Subprocess inherits only necessary environment |
+| Supply chain | stdlib only — zero third-party dependencies |
 
 ---
 
 ## Integrating with Your Skills
 
-Context Saver works with **any** OpenClaw skill out of the box. It wraps the skill's CLI output and filters it automatically.
-
-For even better results, add a `--summary` flag to your skill scripts so they can produce domain-aware compact output:
+Context Saver works with **any** OpenClaw skill out of the box. For best results, make your skills **compact-by-default**:
 
 ```python
 # my_skill/scripts/cli.py
 import argparse, json
 
-def summarize(data, fields=None):
-    if fields:
-        return {k: v for k, v in data.items() if k in fields}
-    return {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
+SUMMARY_MODE = True  # Compact by default
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--summary", action="store_true")
-parser.add_argument("--fields", help="Comma-separated fields")
+parser.add_argument("--summary", default=True)
+parser.add_argument("--verbose", action="store_true",
+                    help="Full output (default is compact)")
+
 args = parser.parse_args()
+SUMMARY_MODE = not args.verbose
 
 result = your_api_call()
-if args.summary:
-    result = summarize(result, args.fields.split(",") if args.fields else None)
+if SUMMARY_MODE:
+    # Return only essential fields
+    result = {k: v for k, v in result.items()
+              if not isinstance(v, (dict, list))}
 print(json.dumps(result))
 ```
 
-See [docs/INTEGRATION.md](docs/INTEGRATION.md) for pipeline integration, automated event logging, HEARTBEAT.md hooks, and workflow-engine compatibility.
+ctx_run.py will automatically inject `--verbose` to get full data for its own filtering, while direct agent calls get the compact default.
 
 ---
 
@@ -435,21 +619,24 @@ See [docs/INTEGRATION.md](docs/INTEGRATION.md) for pipeline integration, automat
 ```
 openclaw-context-saver/
 ├── scripts/
-│   ├── ctx_run.py        # Sandboxed skill execution + intent filtering
-│   ├── ctx_batch.py      # Multi-skill batch execution
-│   ├── ctx_session.py    # Session event tracking + snapshots
-│   ├── ctx_search.py     # FTS5 search across indexed outputs
-│   └── ctx_stats.py      # Usage statistics dashboard
+│   ├── ctx_run.py                  # Sandboxed execution + intent filtering + verbose injection
+│   ├── ctx_batch.py                # Multi-skill batch execution
+│   ├── ctx_session.py              # Session event tracking + snapshots
+│   ├── ctx_search.py               # FTS5 search across indexed outputs
+│   ├── ctx_stats.py                # Usage statistics dashboard
+│   ├── morning_brief_pipeline.py   # Zero-token pipeline: gather → format → deliver
+│   └── deliver.py                  # Multi-messenger delivery (iMessage/Telegram/Slack/Discord)
+├── install.py                      # One-command installer with --dry-run, --verify, --uninstall
 ├── docs/
-│   ├── ARCHITECTURE.md   # Data flow, schemas, algorithms
-│   ├── BENCHMARKS.md     # Detailed scenarios and methodology
-│   └── INTEGRATION.md    # How to integrate with existing skills
+│   ├── ARCHITECTURE.md
+│   ├── BENCHMARKS.md
+│   └── INTEGRATION.md
 ├── examples/
-│   ├── daily-status-pipeline.json    # Example batch pipeline
-│   └── eod-report-pipeline.json      # Example EOD pipeline
-├── SKILL.md              # OpenClaw skill manifest
-├── skill.json            # Machine-readable skill definition
-├── LICENSE               # MIT
+│   ├── daily-status-pipeline.json
+│   └── eod-report-pipeline.json
+├── SKILL.md
+├── skill.json
+├── LICENSE
 └── README.md
 ```
 
@@ -485,9 +672,7 @@ Every major AI agent framework has the same problem: they dump raw API responses
 | **Semantic Kernel** | MS agent framework | No. Memory is retrieval-based, not input-optimized. |
 | **context-mode** | FTS5 index for Claude | Partial. Indexes for retrieval, but doesn't filter inputs. |
 | **RAG pipelines** | Retrieval-augmented generation | Solves retrieval. Doesn't solve what goes INTO context. |
-| **Context Saver** | **Purpose-built context optimization** | **Yes. Filters, summarizes, batches, and snapshots.** |
-
-The entire AI industry is focused on what to *retrieve* from external sources. Nobody optimized what actually *enters* the context window from tool calls. That's the gap Context Saver fills.
+| **Context Saver** | **Purpose-built context optimization** | **Yes. Filters, summarizes, batches, delivers, and snapshots.** |
 
 ### Comparison with context-mode
 
@@ -500,6 +685,9 @@ Context Saver was inspired by [context-mode](https://github.com/AnswerDotAI/cont
 | Filtering | Query-based post-retrieval | Intent-driven pre-filtering |
 | Batching | Not supported | Multi-skill batch execution |
 | Sessions | Not supported | Priority-based event tracking + snapshots |
+| Delivery | Not supported | iMessage, Telegram, Slack, Discord |
+| Pipelines | Not supported | Zero-token launchd/cron pipelines |
+| Security | N/A | Command injection, path traversal, secret redaction |
 | Token savings | Indirect (faster retrieval) | Direct (70-98% fewer tokens entering context) |
 | Target | Any Claude Code user | Any AI agent system (OpenClaw, custom, etc.) |
 
@@ -522,6 +710,7 @@ Both tools can coexist — they solve different layers of the same problem.
 - Errors return `{"success": false, "error": "message"}`
 - Every script must support `--help`
 - Keep the tool generic — no references to specific APIs or services
+- **Security first** — validate all user inputs, never use `shell=True`
 
 ---
 
@@ -531,4 +720,4 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-Built for [OpenClaw](https://github.com/openclaw) multi-agent systems.
+Built for [OpenClaw](https://github.com/openclaw-ai) multi-agent systems.
