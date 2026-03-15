@@ -227,9 +227,9 @@ def _filter_list_by_intent(items, intent_lower, keywords, limit):
     """Score and filter a list of items by intent keywords."""
     # "summary" intent: return compact per-item dicts (key scalars only)
     if "summary" in intent_lower or "brief" in intent_lower:
-        summary_keys = ("symbol", "qty", "unrealized_pl", "unrealized_plpc",
-                        "current_price", "market_value", "side", "name",
-                        "pnl", "change", "change_pct", "percent_change")
+        summary_keys = ("symbol", "s", "qty", "unrealized_pl", "unrealized_plpc",
+                        "current_price", "price", "market_value", "side", "name",
+                        "pnl", "change", "chg", "change_pct", "percent_change")
         result = []
         for item in items:
             if isinstance(item, dict):

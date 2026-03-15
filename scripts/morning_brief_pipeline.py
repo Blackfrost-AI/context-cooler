@@ -127,15 +127,18 @@ def format_brief(account, positions, movers, detailed=False):
             if detailed:
                 for pos in pos_list:
                     if isinstance(pos, dict):
-                        sym = pos.get("symbol", "?")
+                        sym = pos.get("symbol", pos.get("s", "?"))
                         qty = pos.get("qty", "?")
                         pl = pos.get("unrealized_pl", pos.get("pnl", "?"))
-                        price = pos.get("current_price", pos.get("market_value", "?"))
+                        price = pos.get("current_price", pos.get("market_value", ""))
                         plpc = pos.get("unrealized_plpc", "")
                         pct_str = f" ({float(plpc)*100:+.1f}%)" if plpc else ""
-                        lines.append(f"  {sym}: {qty} shares @ ${_fmt_num(price)}, P&L: ${_fmt_num(pl)}{pct_str}")
+                        if price:
+                            lines.append(f"  {sym}: {qty} shares @ ${_fmt_num(price)}, P&L: ${_fmt_num(pl)}{pct_str}")
+                        else:
+                            lines.append(f"  {sym}: {qty} shares, P&L: ${_fmt_num(pl)}{pct_str}")
             else:
-                symbols = [p.get("symbol", "?") for p in pos_list if isinstance(p, dict)]
+                symbols = [p.get("symbol", p.get("s", "?")) for p in pos_list if isinstance(p, dict)]
                 lines.append(f"  Holdings: {', '.join(symbols)}")
         else:
             lines.append(f"\n📈 Positions: {count} holdings")
@@ -147,14 +150,15 @@ def format_brief(account, positions, movers, detailed=False):
         summary = movers.get("summary", [])
         mover_list = summary
         if isinstance(summary, dict):
-            mover_list = summary.get("movers", summary.get("data", []))
+            # Handle both verbose ("movers") and compact ("top") key names
+            mover_list = summary.get("movers", summary.get("top", summary.get("data", [])))
 
         if isinstance(mover_list, list) and mover_list:
             lines.append(f"\n🔥 Top Movers")
             for m in mover_list[:5]:
                 if isinstance(m, dict):
-                    sym = m.get("symbol", "?")
-                    change = m.get("change_pct", m.get("percent_change", m.get("change", "?")))
+                    sym = m.get("symbol", m.get("s", "?"))
+                    change = m.get("change_pct", m.get("chg", m.get("percent_change", m.get("change", "?"))))
                     price = m.get("price", "")
                     price_str = f" (${_fmt_num(price)})" if price else ""
                     lines.append(f"  {sym}: {_fmt_num(change)}%{price_str}")
