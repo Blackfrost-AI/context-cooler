@@ -105,7 +105,7 @@ def _sanitize_skill_name(name):
     """Validate skill name to prevent path traversal.
 
     Only allows alphanumeric characters, hyphens, and underscores.
-    Blocks: .., /, \, null bytes, and any other path manipulation.
+    Blocks: .., /, backslash, null bytes, and any other path manipulation.
     """
     import re
     if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$', name):
@@ -165,7 +165,41 @@ def filter_by_intent(data, intent):
     intent_lower = intent.lower()
     keywords = intent_lower.split()
 
+    # Extract count from intent (e.g. "top 5")
+    limit = 5
+    for kw in keywords:
+        try:
+            limit = int(kw)
+            break
+        except ValueError:
+            pass
+
+    # --- List: score and filter items ---
+    if isinstance(data, list):
+        return _filter_list_by_intent(data, intent_lower, keywords, limit)
+
+    # --- Dict: check if it's a wrapper around a list (e.g. {"count":8,"positions":[...]}) ---
     if isinstance(data, dict):
+        # Look for a nested list value — common API wrapper pattern
+        nested_list = None
+        nested_key = None
+        scalar_fields = {}
+        for key, value in data.items():
+            if isinstance(value, list) and nested_list is None:
+                nested_list = value
+                nested_key = key
+            elif not isinstance(value, (dict, list)):
+                scalar_fields[key] = value
+
+        if nested_list is not None:
+            # Recurse into the nested list with the same intent
+            filtered_list = _filter_list_by_intent(nested_list, intent_lower, keywords, limit)
+            # Return compact wrapper: scalar fields + filtered list
+            result = dict(scalar_fields)
+            result[nested_key] = filtered_list
+            return result
+
+        # No nested list — score dict keys directly
         scored = {}
         for key, value in data.items():
             score = 0
@@ -182,50 +216,60 @@ def filter_by_intent(data, intent):
         if scored:
             sorted_fields = sorted(scored.items(), key=lambda x: x[1][1], reverse=True)
             return {k: v[0] for k, v in sorted_fields[:10]}
-        return {k: v for i, (k, v) in enumerate(data.items()) if i < 5}
-
-    if isinstance(data, list):
-        scored_items = []
-        for item in data:
-            score = 0
-            item_str = json.dumps(item).lower()
-            for kw in keywords:
-                if kw in item_str:
-                    score += 1
-            # Special handling for common intents
-            if isinstance(item, dict):
-                if "losing" in intent_lower or "loss" in intent_lower:
-                    for k in ("unrealized_pl", "pnl", "profit_loss", "pl"):
-                        if k in item:
-                            try:
-                                if float(item[k]) < 0:
-                                    score += 5
-                            except (ValueError, TypeError):
-                                pass
-                if "top" in intent_lower or "best" in intent_lower:
-                    for k in ("change_pct", "percent_change", "change"):
-                        if k in item:
-                            try:
-                                score += abs(float(item[k]))
-                            except (ValueError, TypeError):
-                                pass
-            scored_items.append((item, score))
-
-        scored_items.sort(key=lambda x: x[1], reverse=True)
-
-        # Try to extract a count from intent (e.g., "top 5")
-        limit = 5
-        for kw in keywords:
-            try:
-                limit = int(kw)
-                break
-            except ValueError:
-                pass
-
-        return [item for item, score in scored_items[:limit] if score > 0] or \
-               [item for item, _ in scored_items[:limit]]
+        # Fallback: scalars only (no giant nested objects)
+        scalars = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
+        return scalars if scalars else {k: v for i, (k, v) in enumerate(data.items()) if i < 5}
 
     return data
+
+
+def _filter_list_by_intent(items, intent_lower, keywords, limit):
+    """Score and filter a list of items by intent keywords."""
+    # "summary" intent: return compact per-item dicts (key scalars only)
+    if "summary" in intent_lower or "brief" in intent_lower:
+        summary_keys = ("symbol", "qty", "unrealized_pl", "unrealized_plpc",
+                        "current_price", "market_value", "side", "name",
+                        "pnl", "change", "change_pct", "percent_change")
+        result = []
+        for item in items:
+            if isinstance(item, dict):
+                compact = {k: v for k, v in item.items()
+                           if k in summary_keys and not isinstance(v, (dict, list))}
+                if compact:
+                    result.append(compact)
+            else:
+                result.append(item)
+        return result[:limit]
+
+    scored_items = []
+    for item in items:
+        score = 0
+        item_str = json.dumps(item).lower()
+        for kw in keywords:
+            if kw in item_str:
+                score += 1
+        # Special handling for common intents
+        if isinstance(item, dict):
+            if "losing" in intent_lower or "loss" in intent_lower:
+                for k in ("unrealized_pl", "pnl", "profit_loss", "pl"):
+                    if k in item:
+                        try:
+                            if float(item[k]) < 0:
+                                score += 5
+                        except (ValueError, TypeError):
+                            pass
+            if "top" in intent_lower or "best" in intent_lower:
+                for k in ("change_pct", "percent_change", "change"):
+                    if k in item:
+                        try:
+                            score += abs(float(item[k]))
+                        except (ValueError, TypeError):
+                            pass
+        scored_items.append((item, score))
+
+    scored_items.sort(key=lambda x: x[1], reverse=True)
+    return [item for item, score in scored_items[:limit] if score > 0] or \
+           [item for item, _ in scored_items[:limit]]
 
 
 def _redact_secrets(text):
