@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Morning brief pipeline — gathers all trading data through context-saver
-and returns a formatted brief ready to send.
+"""Morning brief pipeline — gathers data, formats, and delivers via iMessage.
 
-This script IS the morning brief data layer. The cron job agent doesn't
-touch alpaca-trader directly — it just runs this and formats the output.
+NO AGENT NEEDED. This script does everything:
+1. Gathers trading data through ctx_run.py (context-saver)
+2. Formats into a clean brief
+3. Sends directly via `imsg send`
 
 Usage:
-    python3 morning_brief_pipeline.py
-    python3 morning_brief_pipeline.py --detailed   # Include position-level P&L
+    python3 morning_brief_pipeline.py --to +15551234567
+    python3 morning_brief_pipeline.py --to +15551234567 --detailed
+    python3 morning_brief_pipeline.py --to +15551234567 --to +15551234567  # Multiple recipients
+    python3 morning_brief_pipeline.py --print-only   # Don't send, just print
 """
 
 import argparse
@@ -15,11 +18,13 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
+import time
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
 CTX_RUN = os.path.join(OPENCLAW_HOME, "workspace/skills/context-saver/scripts/ctx_run.py")
 ENV_FILE = os.path.join(OPENCLAW_HOME, ".env")
+DELIVER = os.path.join(SCRIPT_DIR, "deliver.py")
 
 
 def load_env():
@@ -58,6 +63,26 @@ def run_ctx(skill, cmd, intent=None, fields=None):
         return {"success": False, "error": str(e)}
 
 
+def send_message(to, text, backend="auto"):
+    """Send a message using the unified deliver.py backend."""
+    cmd = ["python3", DELIVER, "--text", text]
+    if to:
+        cmd.extend(["--to", to])
+    if backend != "auto":
+        cmd.extend(["--backend", backend])
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        return result.returncode == 0, result.stdout.strip() or result.stderr.strip() or "sent"
+    except Exception as e:
+        return False, str(e)
+
+
 def format_brief(account, positions, movers, detailed=False):
     """Format gathered data into a clean morning brief."""
     lines = []
@@ -87,7 +112,6 @@ def format_brief(account, positions, movers, detailed=False):
     # Positions
     if positions.get("success"):
         summary = positions.get("summary", [])
-        # Extract list from dict wrapper (e.g., {"count": 8, "positions": [...]})
         pos_list = summary
         if isinstance(summary, dict):
             pos_list = summary.get("positions", summary.get("data", []))
@@ -121,7 +145,6 @@ def format_brief(account, positions, movers, detailed=False):
     # Movers
     if movers.get("success"):
         summary = movers.get("summary", [])
-        # Extract list from dict wrapper (e.g., {"movers": [...]})
         mover_list = summary
         if isinstance(summary, dict):
             mover_list = summary.get("movers", summary.get("data", []))
@@ -138,14 +161,14 @@ def format_brief(account, positions, movers, detailed=False):
         else:
             lines.append(f"\n🔥 Movers: {summary}")
 
-    # Token savings
+    # Token savings footer
     total_raw = sum(r.get("raw_bytes", 0) for r in [account, positions, movers])
     total_summary = sum(r.get("summary_bytes", 0) for r in [account, positions, movers])
     total_saved = sum(r.get("bytes_saved", 0) for r in [account, positions, movers])
 
     if total_raw > 0:
         pct = round(total_saved / total_raw * 100, 1)
-        lines.append(f"\n🪶 Context Saver: {total_raw}B → {total_summary}B ({pct}% saved)")
+        lines.append(f"\n🪶 Saved {pct}% via Context Saver")
 
     return "\n".join(lines)
 
@@ -162,12 +185,18 @@ def _fmt_num(val):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Morning brief pipeline via context-saver")
-    parser.add_argument("--detailed", action="store_true", help="Include position-level detail")
+    parser = argparse.ArgumentParser(description="Morning brief: gather → format → deliver via iMessage")
+    parser.add_argument("--to", action="append", help="Recipient (phone for imessage, chat_id for telegram)")
+    parser.add_argument("--backend", default="auto", help="Delivery backend: imessage, telegram, slack, discord, auto")
+    parser.add_argument("--detailed", action="store_true", help="Include position-level P&L")
     parser.add_argument("--json", action="store_true", help="Output raw JSON instead of formatted text")
+    parser.add_argument("--print-only", action="store_true", help="Print brief without sending")
     args = parser.parse_args()
 
-    # Gather data through context-saver (3 calls, each filtered)
+    if not args.to and not args.print_only and not args.json:
+        parser.error("--to <phone> required (or use --print-only)")
+
+    # Gather data through context-saver
     account = run_ctx("alpaca-trader", "account", fields="equity,buying_power,cash,day_pnl,portfolio_value")
     positions = run_ctx("alpaca-trader", "positions", intent="summary" if not args.detailed else "top 20")
     movers = run_ctx("alpaca-trader", "movers", intent="top 5")
@@ -179,9 +208,38 @@ def main():
             "movers": movers,
         }
         print(json.dumps(output, indent=2))
-    else:
-        brief = format_brief(account, positions, movers, detailed=args.detailed)
+        return
+
+    brief = format_brief(account, positions, movers, detailed=args.detailed)
+
+    if args.print_only:
         print(brief)
+        return
+
+    # Deliver via unified backend (imessage, telegram, slack, etc.)
+    results = {"brief": brief, "backend": args.backend, "deliveries": []}
+    for recipient in args.to:
+        ok, msg = send_message(recipient, brief, backend=args.backend)
+        results["deliveries"].append({
+            "to": recipient,
+            "status": "delivered" if ok else "failed",
+            "detail": msg,
+        })
+        if ok:
+            print(f"✅ Sent to {recipient}")
+        else:
+            print(f"❌ Failed to send to {recipient}: {msg}", file=sys.stderr)
+
+    # Log delivery
+    log_file = os.path.join(OPENCLAW_HOME, "workspace/memory/morning-brief-deliveries.log")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    with open(log_file, "a") as f:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        for d in results["deliveries"]:
+            f.write(f"[{ts}] {d['to']}: {d['status']}\n")
+
+    # Print JSON summary for pipeline consumers
+    print(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":

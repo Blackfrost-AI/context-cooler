@@ -101,17 +101,37 @@ def find_skill_script(skill_name):
     return None
 
 
+def _sanitize_skill_name(name):
+    """Validate skill name to prevent path traversal.
+
+    Only allows alphanumeric characters, hyphens, and underscores.
+    Blocks: .., /, \, null bytes, and any other path manipulation.
+    """
+    import re
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$', name):
+        raise ValueError(f"Invalid skill name: {name!r} (only alphanumeric, hyphens, underscores)")
+    if '..' in name or '/' in name or '\\' in name:
+        raise ValueError(f"Path traversal blocked in skill name: {name!r}")
+    return name
+
+
 def run_skill(skill_name, command, env):
     """Execute a skill command in a subprocess and capture output."""
+    # SECURITY: Validate skill name to prevent path traversal
+    skill_name = _sanitize_skill_name(skill_name)
+
     script = find_skill_script(skill_name)
     if not script:
-        return None, f"Skill '{skill_name}' not found in {SKILLS_DIR}"
+        return None, f"Skill not found: {skill_name}"
 
-    full_cmd = f"python3 {script} {command}"
+    # SECURITY: Use list-based subprocess (no shell=True) to prevent command injection.
+    # The command string is split into arguments safely via shlex.
+    import shlex
+    cmd_args = ["python3", script] + shlex.split(command)
     try:
         result = subprocess.run(
-            full_cmd,
-            shell=True,
+            cmd_args,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=30,
@@ -208,12 +228,42 @@ def filter_by_intent(data, intent):
     return data
 
 
+def _redact_secrets(text):
+    """Redact potential secrets/API keys from text before indexing.
+
+    Matches common secret patterns: API keys, tokens, passwords, etc.
+    This prevents sensitive data from leaking into the FTS5 index.
+    """
+    import re
+    patterns = [
+        # API keys / tokens (long alphanumeric strings that look like keys)
+        (r'(?i)(api[_-]?key|secret[_-]?key|access[_-]?token|bearer|password|auth[_-]?token)'
+         r'[\s:=]+["\']?([A-Za-z0-9_\-/.+]{20,})["\']?', r'\1=***REDACTED***'),
+        # Generic long base64-ish strings (likely tokens) in JSON values
+        (r'"([^"]{0,30}(?:key|secret|token|password|credential)[^"]{0,10})"'
+         r'\s*:\s*"([^"]{20,})"', r'"\1":"***REDACTED***"'),
+        # PK-prefixed keys (Alpaca, Stripe, etc.)
+        (r'(?:PK|SK|pk|sk)[A-Za-z0-9]{16,}', '***REDACTED***'),
+        # Bearer tokens in raw output
+        (r'Bearer\s+[A-Za-z0-9_\-/.+]{20,}', 'Bearer ***REDACTED***'),
+    ]
+    result = text
+    for pattern, replacement in patterns:
+        result = re.sub(pattern, replacement, result)
+    return result
+
+
 def index_output(conn, skill, command, content, timestamp):
-    """Index the full output in FTS5 for later search."""
+    """Index the full output in FTS5 for later search.
+
+    Content is redacted for secrets before indexing to prevent
+    sensitive data (API keys, tokens) from leaking into the search index.
+    """
     try:
+        safe_content = _redact_secrets(content)
         conn.execute(
             "INSERT INTO fts_index (skill, command, content, timestamp) VALUES (?, ?, ?, ?)",
-            (skill, command, content, timestamp),
+            (skill, command, safe_content, timestamp),
         )
         conn.commit()
     except Exception:
