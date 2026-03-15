@@ -127,7 +127,16 @@ def run_skill(skill_name, command, env):
     # SECURITY: Use list-based subprocess (no shell=True) to prevent command injection.
     # The command string is split into arguments safely via shlex.
     import shlex
-    cmd_args = ["python3", script] + shlex.split(command)
+    cmd_parts = shlex.split(command)
+
+    # Always request verbose output from skills so ctx_run can apply its own
+    # intent filtering against the full data. Skills that default to compact
+    # output would otherwise pre-compress the data, making ctx_run's filtering
+    # redundant and understating the true savings.
+    if "--verbose" not in cmd_parts and "--raw" not in cmd_parts:
+        cmd_parts = ["--verbose"] + cmd_parts
+
+    cmd_args = ["python3", script] + cmd_parts
     try:
         result = subprocess.run(
             cmd_args,

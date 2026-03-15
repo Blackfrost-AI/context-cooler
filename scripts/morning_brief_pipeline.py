@@ -202,7 +202,7 @@ def main():
 
     # Gather data through context-saver
     account = run_ctx("alpaca-trader", "account", fields="equity,buying_power,cash,day_pnl,portfolio_value")
-    positions = run_ctx("alpaca-trader", "positions", intent="summary" if not args.detailed else "top 20")
+    positions = run_ctx("alpaca-trader", "positions", intent="summary" if not args.detailed else "summary 20")
     movers = run_ctx("alpaca-trader", "movers", intent="top 5")
 
     if args.json:
