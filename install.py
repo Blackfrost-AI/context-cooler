@@ -27,7 +27,7 @@ from pathlib import Path
 from textwrap import dedent
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "1.0.0"
+VERSION = "4.0.0"
 
 # Skills whose output should be routed through context-saver
 DATA_HEAVY_SKILLS = [
@@ -405,6 +405,109 @@ def patch_cron_jobs(openclaw_home: Path, dry_run: bool) -> bool:
     return True
 
 
+def build_mcp_server(dry_run: bool) -> bool:
+    """Install npm dependencies and build the MCP server."""
+    package_json = SCRIPT_DIR / "package.json"
+    if not package_json.exists():
+        log("No package.json found — skipping MCP server build", "SKIP")
+        return True
+
+    node_modules = SCRIPT_DIR / "node_modules"
+    dist_dir = SCRIPT_DIR / "dist"
+
+    if dry_run:
+        if not node_modules.exists():
+            log("Would run: npm install", "DRY")
+        log("Would run: npx tsc", "DRY")
+        return True
+
+    import subprocess
+
+    # npm install (skip if node_modules exists)
+    if not node_modules.exists():
+        log("Running npm install...")
+        result = subprocess.run(
+            ["npm", "install"],
+            cwd=str(SCRIPT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            log(f"npm install failed: {result.stderr[:200]}", "ERR")
+            return False
+        log("npm install complete", "OK")
+    else:
+        log("node_modules exists — skipping npm install", "SKIP")
+
+    # TypeScript build
+    log("Building TypeScript...")
+    result = subprocess.run(
+        ["npx", "tsc"],
+        cwd=str(SCRIPT_DIR),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        log(f"TypeScript build failed: {result.stderr[:500]}", "ERR")
+        return False
+
+    server_js = dist_dir / "server.js"
+    if server_js.exists():
+        log(f"MCP server built: {server_js}", "OK")
+        return True
+    else:
+        log("Build completed but dist/server.js not found", "ERR")
+        return False
+
+
+def register_mcp_server(dry_run: bool) -> bool:
+    """Register openclaw-context-saver in ~/.claude.json as an MCP server."""
+    claude_json = Path.home() / ".claude.json"
+    server_js = SCRIPT_DIR / "dist" / "server.js"
+
+    if not server_js.exists() and not dry_run:
+        log("dist/server.js not found — build first", "ERR")
+        return False
+
+    server_path = str(server_js)
+
+    if dry_run:
+        log(f"Would register MCP server in {claude_json}", "DRY")
+        return True
+
+    # Read existing config
+    config = {}
+    if claude_json.exists():
+        try:
+            config = json.loads(claude_json.read_text())
+        except json.JSONDecodeError:
+            log(f"Failed to parse {claude_json}", "WARN")
+            config = {}
+
+    servers = config.setdefault("mcpServers", {})
+
+    # Check if already registered with same path
+    existing = servers.get("openclaw-context-saver", {})
+    existing_args = existing.get("args", [])
+    if existing_args and existing_args[-1] == server_path:
+        log("MCP server already registered with correct path", "SKIP")
+        return True
+
+    # Register
+    servers["openclaw-context-saver"] = {
+        "type": "stdio",
+        "command": "node",
+        "args": [server_path],
+        "env": {},
+    }
+
+    claude_json.write_text(json.dumps(config, indent=2) + "\n")
+    log(f"Registered openclaw-context-saver in {claude_json}", "OK")
+    return True
+
+
 def uninstall(openclaw_home: Path, dry_run: bool) -> bool:
     """Remove context-saver wiring from AGENTS.md, TOOLS.md, and cron jobs."""
     print("\n🗑️  Uninstalling Context Saver wiring...\n")
@@ -480,10 +583,25 @@ def verify_installation(openclaw_home: Path) -> dict:
     """Check installation status and return a report."""
     report = {}
 
+    # Check MCP server build
+    server_js = SCRIPT_DIR / "dist" / "server.js"
+    report["mcp_server_built"] = server_js.exists()
+
+    # Check MCP registration
+    claude_json = Path.home() / ".claude.json"
+    if claude_json.exists():
+        try:
+            config = json.loads(claude_json.read_text())
+            report["mcp_registered"] = "openclaw-context-saver" in config.get("mcpServers", {})
+        except json.JSONDecodeError:
+            report["mcp_registered"] = False
+    else:
+        report["mcp_registered"] = False
+
     # Check scripts
     scripts_dir = openclaw_home / "workspace" / "skills" / "context-saver" / "scripts"
     scripts = ["ctx_run.py", "ctx_batch.py", "ctx_search.py", "ctx_session.py", "ctx_stats.py"]
-    report["scripts"] = all((scripts_dir / s).exists() for s in scripts)
+    report["python_scripts"] = all((scripts_dir / s).exists() for s in scripts)
 
     # Check databases
     report["stats_db"] = (openclaw_home / "context" / "stats.db").exists()
@@ -568,6 +686,8 @@ def main():
     print(f"   Target: {openclaw_home}\n")
 
     steps = [
+        ("Building MCP server", lambda: build_mcp_server(args.dry_run)),
+        ("Registering MCP server", lambda: register_mcp_server(args.dry_run)),
         ("Installing scripts", lambda: install_scripts(openclaw_home, args.dry_run)),
         ("Initializing databases", lambda: init_databases(openclaw_home, args.dry_run)),
     ]
