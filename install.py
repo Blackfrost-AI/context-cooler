@@ -348,13 +348,24 @@ def patch_cron_jobs(openclaw_home: Path, dry_run: bool) -> bool:
         return True
 
     try:
-        jobs = json.loads(jobs_file.read_text())
+        raw = json.loads(jobs_file.read_text())
     except json.JSONDecodeError as e:
         log(f"Failed to parse jobs.json: {e}", "ERR")
         return False
 
+    # Support both formats: bare list or {"jobs": [...], ...}
+    is_wrapped = False
+    if isinstance(raw, dict) and "jobs" in raw:
+        jobs = raw["jobs"]
+        is_wrapped = True
+    elif isinstance(raw, list):
+        jobs = raw
+    else:
+        log("jobs.json has unexpected format — skipping", "WARN")
+        return True
+
     if not isinstance(jobs, list):
-        log("jobs.json is not a list — skipping", "WARN")
+        log("jobs list is not an array — skipping", "WARN")
         return True
 
     patched_count = 0
@@ -397,7 +408,11 @@ def patch_cron_jobs(openclaw_home: Path, dry_run: bool) -> bool:
         patched_count += 1
 
     if patched_count > 0 and not dry_run:
-        jobs_file.write_text(json.dumps(jobs, indent=2) + "\n")
+        if is_wrapped:
+            raw["jobs"] = jobs
+            jobs_file.write_text(json.dumps(raw, indent=2) + "\n")
+        else:
+            jobs_file.write_text(json.dumps(jobs, indent=2) + "\n")
         log(f"Patched {patched_count} cron job(s) in jobs.json", "OK")
     elif patched_count == 0:
         log("All cron jobs already wired or no data-heavy skills found", "SKIP")
@@ -559,7 +574,11 @@ def uninstall(openclaw_home: Path, dry_run: bool) -> bool:
     jobs_file = openclaw_home / "cron" / "jobs.json"
     if jobs_file.exists():
         try:
-            jobs = json.loads(jobs_file.read_text())
+            raw = json.loads(jobs_file.read_text())
+            is_wrapped = isinstance(raw, dict) and "jobs" in raw
+            jobs = raw["jobs"] if is_wrapped else raw
+            if not isinstance(jobs, list):
+                jobs = []
             patched = 0
             for job in jobs:
                 msg = job.get("message", "")
@@ -571,7 +590,11 @@ def uninstall(openclaw_home: Path, dry_run: bool) -> bool:
                 if dry_run:
                     log(f"Would remove context-saver from {patched} cron job(s)", "DRY")
                 else:
-                    jobs_file.write_text(json.dumps(jobs, indent=2) + "\n")
+                    if is_wrapped:
+                        raw["jobs"] = jobs
+                        jobs_file.write_text(json.dumps(raw, indent=2) + "\n")
+                    else:
+                        jobs_file.write_text(json.dumps(jobs, indent=2) + "\n")
                     log(f"Removed context-saver from {patched} cron job(s)", "OK")
         except (json.JSONDecodeError, ValueError):
             log("Failed to parse jobs.json during uninstall", "WARN")
