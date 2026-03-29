@@ -1,0 +1,42 @@
+{
+  "name": "openclaw-context-saver",
+  "version": "3.0.0",
+  "description": "MCP server for AI agent context window optimization. Sandboxed execution, intent-driven filtering, FTS5 knowledge base, session continuity, and multi-messenger delivery.",
+  "main": "dist/server.js",
+  "bin": {
+    "openclaw-context-saver": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "mcp",
+    "context-window",
+    "ai-agent",
+    "token-optimization",
+    "openclaw",
+    "claude",
+    "cursor",
+    "fts5"
+  ],
+  "author": "OpenClaw",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tlancas25/openclaw-context-saver.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "better-sqlite3": "^11.0.0",
+    "turndown": "^7.2.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.0",
+    "typescript": "^5.5.0"
+  }
+}

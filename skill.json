@@ -1,8 +1,33 @@
 {
   "name": "context-saver",
-  "version": "2.0.0",
-  "description": "Token-saving execution layer — sandboxed skill runs, intent filtering, session continuity, auto-installer with agent wiring",
-  "capabilities": ["run", "batch", "session-log", "session-snapshot", "session-restore", "search", "stats", "install", "uninstall", "verify"],
+  "version": "3.0.0",
+  "description": "MCP server for AI agent context window optimization — sandboxed execution, intent filtering, FTS5 knowledge base, session continuity, multi-messenger delivery",
+  "type": "mcp-server",
+  "transport": "stdio",
+  "command": "node",
+  "args": ["dist/server.js"],
+  "tools": [
+    "ctx_execute",
+    "ctx_execute_file",
+    "ctx_batch",
+    "ctx_search",
+    "ctx_index",
+    "ctx_fetch_index",
+    "ctx_session",
+    "ctx_stats",
+    "ctx_deliver",
+    "ctx_doctor"
+  ],
+  "capabilities": [
+    "sandboxed-execution",
+    "intent-filtering",
+    "fts5-knowledge-base",
+    "session-continuity",
+    "multi-messenger-delivery",
+    "zero-token-pipelines",
+    "verbose-injection",
+    "compact-by-default"
+  ],
   "outputSchema": {
     "success": "boolean",
     "summary": "string",
@@ -10,5 +35,5 @@
     "data": "object"
   },
   "sla": { "maxLatencyMs": 30000, "availability": 0.99 },
-  "permissions": ["exec:skills", "fs:context/*"]
+  "permissions": ["exec:skills", "fs:context/*", "net:http", "net:https"]
 }
