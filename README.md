@@ -26,6 +26,33 @@ Context Saver v3.0 is a **dual-layer optimization system** that extends the open
 
 ---
 
+## Installation & Updates
+
+**First-time install (macOS / Linux / Windows):**
+```bash
+git clone https://github.com/tlancas25/openclaw-context-saver.git
+cd openclaw-context-saver
+python3 install.py
+```
+
+**Update to the latest version:**
+```bash
+cd openclaw-context-saver
+python3 install.py --update
+```
+
+**Other commands:**
+```bash
+python3 install.py --dry-run          # Preview changes without writing
+python3 install.py --verify           # Check installation status
+python3 install.py --uninstall        # Remove context-saver wiring
+python3 install.py --accept-disclaimer  # Skip disclaimer prompt (CI/scripts)
+```
+
+> **Windows users:** Use `python` instead of `python3`. After install, a post-install notice will appear with WSL setup instructions and available delivery backends (iMessage is macOS-only).
+
+---
+
 ## The Dual-Layer Architecture
 
 Context Saver v3.0 operates as **two independent but complementary systems**. We verified this hands-on: they maintain separate databases, separate stats, and solve different layers of the same problem.
