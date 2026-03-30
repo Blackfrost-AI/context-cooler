@@ -19,12 +19,17 @@ What it does:
 import argparse
 import json
 import os
+import platform
 import re
 import shutil
 import sqlite3
 import sys
 from pathlib import Path
 from textwrap import dedent
+
+IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 VERSION = "4.0.0"
@@ -171,6 +176,172 @@ python3 ~/.openclaw/workspace/skills/context-saver/scripts/ctx_stats.py
 
 **Wrap these skills:** alpaca-trader, analytics-engine, cost-tracker, x-analytics, x-search, health-monitor, plaid
 **Skip for:** x-post, notification-router, secret-manager, memory-manager (small outputs)'''
+
+
+# ─────────────────────────────────────────────
+# Disclaimer & platform checks
+# ─────────────────────────────────────────────
+
+DISCLAIMER = """\
+================================================================================
+            OpenClaw Context Saver — Disclaimer & Intended Use
+================================================================================
+
+This software is an MCP (Model Context Protocol) server designed to optimize
+AI agent context windows through sandboxed code execution, intent-driven
+filtering, FTS5 knowledge indexing, session continuity, and multi-messenger
+delivery.
+
+INTENDED USE:
+  - Reducing token consumption when AI agents interact with data-heavy APIs
+  - Sandboxed execution of code snippets in 11 supported languages
+  - Indexing and searching structured/unstructured data via SQLite FTS5
+  - Session snapshot and restore for context continuity across conversations
+  - Message delivery via iMessage, Telegram, Slack, and Discord
+
+BY PROCEEDING YOU ACKNOWLEDGE:
+  1. This tool executes code in sandboxed subprocesses on your machine.
+     While env vars are filtered and output is capped, you are responsible
+     for reviewing what code your AI agents run through it.
+  2. Database files (SQLite) are created in ~/.openclaw/context/ to persist
+     indexed data and session state across conversations.
+  3. This software is provided "AS IS" under the MIT License, without
+     warranty of any kind.
+  4. iMessage delivery (macOS only) uses AppleScript to send messages.
+     Telegram/Slack/Discord delivery requires your own API tokens.
+
+Source: https://github.com/tlancas25/openclaw-context-saver
+License: MIT
+================================================================================
+"""
+
+
+def show_disclaimer(skip_prompt: bool = False) -> bool:
+    """Display disclaimer and ask for user consent. Returns True if accepted."""
+    print(DISCLAIMER)
+
+    if skip_prompt:
+        return True
+
+    while True:
+        try:
+            answer = input("Do you accept and wish to continue? [yes/no]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\nInstallation cancelled.\n")
+            return False
+
+        if answer in ("yes", "y"):
+            print()
+            return True
+        elif answer in ("no", "n"):
+            print("\nInstallation cancelled.\n")
+            return False
+        else:
+            print("  Please type 'yes' or 'no'.")
+
+
+def update_from_git() -> bool:
+    """Pull the latest version from the remote git repository."""
+    import subprocess
+
+    git_dir = SCRIPT_DIR / ".git"
+    if not git_dir.exists():
+        print("  This is not a git repository — cannot auto-update.")
+        print("  Re-clone from: https://github.com/tlancas25/openclaw-context-saver.git\n")
+        return False
+
+    print("  Checking for updates...\n")
+
+    # Fetch first to see if there are changes
+    result = subprocess.run(
+        ["git", "fetch"],
+        cwd=str(SCRIPT_DIR),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        print(f"  git fetch failed: {result.stderr.strip()}")
+        return False
+
+    # Check if we're behind
+    result = subprocess.run(
+        ["git", "status", "-uno"],
+        cwd=str(SCRIPT_DIR),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if "Your branch is up to date" in result.stdout:
+        print("  Already on the latest version.\n")
+        # Still run the install to re-build and re-register
+        return True
+
+    # Pull changes
+    print("  Pulling latest changes...")
+    result = subprocess.run(
+        ["git", "pull", "--ff-only"],
+        cwd=str(SCRIPT_DIR),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        print(f"  git pull failed: {result.stderr.strip()}")
+        print("  You may have local changes. Try: git stash && git pull && git stash pop")
+        return False
+
+    print(f"  Updated successfully.\n")
+    # Show what changed
+    for line in result.stdout.strip().split("\n"):
+        if line.strip():
+            print(f"    {line}")
+    print()
+    return True
+
+
+def show_windows_post_install():
+    """Display Windows-specific post-installation notes."""
+    print("""
+================================================================================
+                    Windows Post-Installation Notes
+================================================================================
+
+  1. WSL (Windows Subsystem for Linux) RECOMMENDED
+     ─────────────────────────────────────────────
+     Shell sandboxing (bash, python3, ruby, etc.) works best under WSL.
+     If you don't have WSL installed, many sandbox features will be limited
+     to languages available natively on Windows (node, python, go, rust).
+
+     To install WSL:
+       wsl --install
+
+     Then re-run this installer from inside your WSL terminal for full
+     shell sandboxing support.
+
+  2. iMessage Delivery NOT AVAILABLE
+     ─────────────────────────────────
+     iMessage delivery uses macOS AppleScript and is not available on
+     Windows. You can still use Telegram, Slack, and Discord delivery
+     backends. Set up your tokens in ~/.openclaw/.env:
+       TELEGRAM_BOT_TOKEN=your_token
+       TELEGRAM_CHAT_ID=your_chat_id
+       SLACK_WEBHOOK_URL=https://hooks.slack.com/...
+       DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+  3. Python Command
+     ──────────────
+     On Windows, use 'python' instead of 'python3' for running scripts:
+       python install.py
+       python scripts/ctx_run.py --skill ...
+
+  4. Path Separators
+     ────────────────
+     All internal paths use forward slashes and resolve correctly on
+     Windows via Python's pathlib. No manual path conversion needed.
+
+================================================================================
+""")
 
 
 # ─────────────────────────────────────────────
@@ -438,11 +609,15 @@ def build_mcp_server(dry_run: bool) -> bool:
 
     import subprocess
 
+    # On Windows, npm/npx may need .cmd extension
+    npm_cmd = "npm.cmd" if IS_WINDOWS else "npm"
+    npx_cmd = "npx.cmd" if IS_WINDOWS else "npx"
+
     # npm install (skip if node_modules exists)
     if not node_modules.exists():
         log("Running npm install...")
         result = subprocess.run(
-            ["npm", "install"],
+            [npm_cmd, "install"],
             cwd=str(SCRIPT_DIR),
             capture_output=True,
             text=True,
@@ -458,7 +633,7 @@ def build_mcp_server(dry_run: bool) -> bool:
     # TypeScript build
     log("Building TypeScript...")
     result = subprocess.run(
-        ["npx", "tsc"],
+        [npx_cmd, "tsc"],
         cwd=str(SCRIPT_DIR),
         capture_output=True,
         text=True,
@@ -650,16 +825,19 @@ def verify_installation(openclaw_home: Path) -> dict:
 
 
 def main():
+    py_cmd = "python" if IS_WINDOWS else "python3"
+
     parser = argparse.ArgumentParser(
         description="OpenClaw Context Saver — Automated Installer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=dedent("""
+        epilog=dedent(f"""
         Examples:
-            python3 install.py                          # Install with defaults
-            python3 install.py --dry-run                # Preview changes
-            python3 install.py --uninstall              # Remove wiring
-            python3 install.py --openclaw-home /custom  # Custom path
-            python3 install.py --verify                 # Check status
+            {py_cmd} install.py                          # Install with defaults
+            {py_cmd} install.py --update                 # Pull latest + re-install
+            {py_cmd} install.py --dry-run                # Preview changes
+            {py_cmd} install.py --uninstall              # Remove wiring
+            {py_cmd} install.py --openclaw-home /custom  # Custom path
+            {py_cmd} install.py --verify                 # Check status
         """),
     )
     parser.add_argument(
@@ -674,12 +852,28 @@ def main():
     parser.add_argument("--skip-cron", action="store_true", help="Skip cron job patching")
     parser.add_argument("--skip-agents", action="store_true", help="Skip AGENTS.md patching")
     parser.add_argument("--skip-tools", action="store_true", help="Skip TOOLS.md patching")
+    parser.add_argument("--update", action="store_true", help="Pull latest from git and re-install")
+    parser.add_argument("--accept-disclaimer", action="store_true", help="Accept disclaimer without prompt (for CI/scripted installs)")
     args = parser.parse_args()
+
+    # ── Disclaimer screen (always shown first, except --verify) ──
+    if not args.verify:
+        if not show_disclaimer(skip_prompt=args.accept_disclaimer):
+            sys.exit(1)
+
+    # ── Update mode: git pull then continue to install ──
+    if args.update:
+        if not update_from_git():
+            sys.exit(1)
+        # Force rebuild after update (node_modules stays, but dist gets rebuilt)
+        dist_dir = SCRIPT_DIR / "dist"
+        if dist_dir.exists():
+            shutil.rmtree(dist_dir)
 
     openclaw_home = args.openclaw_home.expanduser().resolve()
 
     if not openclaw_home.exists():
-        print(f"❌ OpenClaw home not found: {openclaw_home}")
+        print(f"  OpenClaw home not found: {openclaw_home}")
         print("   Set OPENCLAW_HOME or use --openclaw-home /path/to/openclaw")
         sys.exit(1)
 
@@ -705,7 +899,9 @@ def main():
 
     # Install mode
     mode = "DRY RUN" if args.dry_run else "INSTALL"
-    print(f"\n🪶 Context Saver Installer v{VERSION} [{mode}]")
+    plat = "Windows" if IS_WINDOWS else ("macOS" if IS_MACOS else ("Linux" if IS_LINUX else sys.platform))
+    print(f"\n  Context Saver Installer v{VERSION} [{mode}]")
+    print(f"   Platform: {plat}")
     print(f"   Target: {openclaw_home}\n")
 
     steps = [
@@ -729,14 +925,21 @@ def main():
 
     print()
     if args.dry_run:
-        print("🔍 Dry run complete. No files were modified.")
-        print("   Run without --dry-run to apply changes.\n")
+        print("  Dry run complete. No files were modified.")
+        print(f"   Run without --dry-run to apply changes.\n")
     elif all_ok:
-        print("✅ Context Saver installed and wired!")
-        print("   Restart your OpenClaw gateway to pick up changes:")
-        print("   launchctl stop ai.openclaw.gateway && launchctl start ai.openclaw.gateway\n")
+        print("  Context Saver installed and wired!")
+        if IS_MACOS:
+            print("   Restart your OpenClaw gateway to pick up changes:")
+            print("   launchctl stop ai.openclaw.gateway && launchctl start ai.openclaw.gateway\n")
+        elif IS_WINDOWS:
+            show_windows_post_install()
+        elif IS_LINUX:
+            print("   Restart your OpenClaw gateway or Claude Code to pick up changes.\n")
+        else:
+            print("   Restart your AI agent to pick up changes.\n")
     else:
-        print("⚠️  Installation completed with warnings. Check output above.\n")
+        print("  Installation completed with warnings. Check output above.\n")
 
     sys.exit(0 if all_ok else 1)
 
