@@ -1,4 +1,4 @@
-# OpenClaw Context Saver v3.0
+# OpenClaw Context Saver v4.5
 
 **Production-grade context optimization for AI agents. Cut token usage by 70-98%. Built on the Model Context Protocol (MCP) via [`context-mode`](https://github.com/mksglu/context-mode) — works with Claude Code, Cursor, Gemini CLI, OpenClaw, and any MCP-compatible agent.**
 

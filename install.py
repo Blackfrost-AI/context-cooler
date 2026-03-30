@@ -32,7 +32,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "4.0.0"
+VERSION = "4.5.0"
 
 # Skills whose output should be routed through context-saver
 DATA_HEAVY_SKILLS = [
