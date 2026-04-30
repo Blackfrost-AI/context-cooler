@@ -23,7 +23,7 @@ import { handleDoctor } from "./tools/doctor";
 loadEnv();
 
 const server = new Server(
-  { name: "openclaw-context-saver", version: "4.5.0" },
+  { name: "openclaw-context-saver", version: "4.6.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -33,7 +33,7 @@ const TOOLS = [
   {
     name: "ctx_execute",
     description:
-      "Execute code in a sandboxed subprocess. Only stdout enters context. Supports 11 languages. Use 'skill' + 'cmd' to execute OpenClaw skills with automatic --verbose injection.",
+      "Execute code in a sandboxed subprocess. Only stdout enters context. Supports 11 languages. Use 'skill' + 'cmd' to execute OpenClaw skills with automatic --verbose injection. Returns a structured result: status (success | runtime_error | timeout | sandbox_violation | language_unavailable), exit_code, duration_ms, plus the filtered stdout summary.",
     inputSchema: {
       type: "object" as const,
       properties: {

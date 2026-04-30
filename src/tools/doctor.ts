@@ -1,9 +1,20 @@
 import { z } from "zod";
 import { execSync } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { getOpenClawHome, getContextDir, isFtsEnabled } from "../lib/env";
 import { getStatsDb, getSessionsDb } from "../lib/db";
+
+// v4.6: where install.py records the timestamp of the most recent install
+// or `--update`. We read this LOCAL file (no network) and surface a
+// reminder if it's older than 30 days.
+const LAST_UPGRADE_PATH = path.join(
+  os.homedir(),
+  ".openclaw-context-saver",
+  "last-upgrade.txt"
+);
+const UPGRADE_REMINDER_DAYS = 30;
 
 export const doctorSchema = z.object({});
 
@@ -174,6 +185,50 @@ export async function handleDoctor(_args: DoctorInput) {
       name: "mcporter",
       status: "warn",
       detail: "not installed (optional — for OpenClaw bridge)",
+    });
+  }
+
+  // v4.6: Local upgrade-reminder check. PURELY local file read — no
+  // outbound network call. install.py writes the ISO timestamp on every
+  // run; we compare to today and warn if older than 30 days.
+  try {
+    if (fs.existsSync(LAST_UPGRADE_PATH)) {
+      const raw = fs.readFileSync(LAST_UPGRADE_PATH, "utf-8").trim();
+      const last = Date.parse(raw);
+      if (!Number.isNaN(last)) {
+        const ageDays = Math.floor((Date.now() - last) / 86400000);
+        if (ageDays >= UPGRADE_REMINDER_DAYS) {
+          checks.push({
+            name: "Upgrade reminder",
+            status: "warn",
+            detail: `last upgraded ${ageDays} days ago — run \`python3 install.py --update\``,
+          });
+        } else {
+          checks.push({
+            name: "Upgrade reminder",
+            status: "ok",
+            detail: `last upgraded ${ageDays} day(s) ago`,
+          });
+        }
+      } else {
+        checks.push({
+          name: "Upgrade reminder",
+          status: "warn",
+          detail: `${LAST_UPGRADE_PATH} is unparseable — run install.py to refresh`,
+        });
+      }
+    } else {
+      checks.push({
+        name: "Upgrade reminder",
+        status: "warn",
+        detail: `no last-upgrade timestamp at ${LAST_UPGRADE_PATH} — run install.py to record one`,
+      });
+    }
+  } catch (err) {
+    checks.push({
+      name: "Upgrade reminder",
+      status: "warn",
+      detail: `could not read ${LAST_UPGRADE_PATH}: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
 

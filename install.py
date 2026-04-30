@@ -17,6 +17,7 @@ What it does:
 """
 
 import argparse
+import datetime
 import json
 import os
 import platform
@@ -32,7 +33,15 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "4.5.0"
+VERSION = "4.6.0"
+
+# v4.6: Local timestamp consulted by ctx_doctor for the "you haven't
+# upgraded in 30+ days" reminder. We touch this on every install/upgrade.
+LAST_UPGRADE_PATH = Path.home() / ".openclaw-context-saver" / "last-upgrade.txt"
+
+# Platform adapters supported by `node dist/adapters/index.js`.
+# Keep this list in sync with src/adapters/index.ts.
+SUPPORTED_PLATFORMS = ["claude-code", "cursor", "codex", "gemini", "opencode"]
 
 # Skills whose output should be routed through context-saver
 DATA_HEAVY_SKILLS = [
@@ -652,50 +661,168 @@ def build_mcp_server(dry_run: bool) -> bool:
         return False
 
 
-def register_mcp_server(dry_run: bool) -> bool:
-    """Register openclaw-context-saver in ~/.claude.json as an MCP server."""
-    claude_json = Path.home() / ".claude.json"
-    server_js = SCRIPT_DIR / "dist" / "server.js"
+def register_mcp_server(dry_run: bool, platforms: list) -> bool:
+    """Register openclaw-context-saver via the v4.6 platform adapters.
 
-    if not server_js.exists() and not dry_run:
+    Shells out to `node dist/adapters/index.js install ...`, one call per
+    platform. Each adapter writes a JSON line to stdout describing what it
+    did (or would do under --dry-run); we surface those as installer logs.
+    """
+    server_js = SCRIPT_DIR / "dist" / "server.js"
+    adapter_js = SCRIPT_DIR / "dist" / "adapters" / "index.js"
+
+    if not dry_run and not server_js.exists():
         log("dist/server.js not found — build first", "ERR")
         return False
+    if not dry_run and not adapter_js.exists():
+        log("dist/adapters/index.js not found — build first", "ERR")
+        return False
 
-    server_path = str(server_js)
-
-    if dry_run:
-        log(f"Would register MCP server in {claude_json}", "DRY")
+    if not platforms:
+        log("No platforms selected for MCP registration", "SKIP")
         return True
 
-    # Read existing config
-    config = {}
-    if claude_json.exists():
+    import subprocess
+
+    all_ok = True
+    for platform_id in platforms:
+        if platform_id not in SUPPORTED_PLATFORMS:
+            log(f"Unknown platform '{platform_id}' — skipping", "WARN")
+            continue
+
+        cmd = [
+            "node",
+            str(adapter_js),
+            "install",
+            f"--server={server_js}",
+            f"--platform={platform_id}",
+        ]
+        if dry_run:
+            cmd.append("--dry-run")
+
         try:
-            config = json.loads(claude_json.read_text())
-        except json.JSONDecodeError:
-            log(f"Failed to parse {claude_json}", "WARN")
-            config = {}
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=15
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as err:
+            log(f"adapter call failed for {platform_id}: {err}", "ERR")
+            all_ok = False
+            continue
 
-    servers = config.setdefault("mcpServers", {})
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                log(f"adapter output unparseable: {line}", "WARN")
+                continue
+            level = "DRY" if dry_run else ("OK" if payload.get("ok") else "ERR")
+            log(f"[{payload.get('platform')}] {payload.get('detail')}", level)
+            if not payload.get("ok"):
+                all_ok = False
 
-    # Check if already registered with same path
-    existing = servers.get("openclaw-context-saver", {})
-    existing_args = existing.get("args", [])
-    if existing_args and existing_args[-1] == server_path:
-        log("MCP server already registered with correct path", "SKIP")
+        if result.returncode != 0:
+            if result.stderr.strip():
+                log(result.stderr.strip(), "WARN")
+            all_ok = False
+
+    return all_ok
+
+
+def record_last_upgrade(dry_run: bool) -> bool:
+    """Write the current ISO timestamp to ~/.openclaw-context-saver/last-upgrade.txt.
+
+    ctx_doctor reads this file (purely locally — no network call) and
+    surfaces a reminder when the timestamp is older than 30 days.
+    """
+    if dry_run:
+        log(f"Would update {LAST_UPGRADE_PATH}", "DRY")
         return True
 
-    # Register
-    servers["openclaw-context-saver"] = {
-        "type": "stdio",
-        "command": "node",
-        "args": [server_path],
-        "env": {},
-    }
+    try:
+        LAST_UPGRADE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        LAST_UPGRADE_PATH.write_text(
+            datetime.datetime.now(datetime.timezone.utc).isoformat() + "\n"
+        )
+        log(f"Wrote upgrade timestamp to {LAST_UPGRADE_PATH}", "OK")
+        return True
+    except OSError as err:
+        log(f"Could not write {LAST_UPGRADE_PATH}: {err}", "WARN")
+        return False
 
-    claude_json.write_text(json.dumps(config, indent=2) + "\n")
-    log(f"Registered openclaw-context-saver in {claude_json}", "OK")
-    return True
+
+def prompt_platforms(non_interactive: bool, default_all: bool = True) -> list:
+    """Interactive picker for the v4.6 platform adapter list.
+
+    Stdlib only (input()). Honoured under TTY; if non-interactive (or
+    --accept-disclaimer), falls back to default_all → SUPPORTED_PLATFORMS.
+    """
+    if non_interactive or not sys.stdin.isatty():
+        return SUPPORTED_PLATFORMS if default_all else ["claude-code"]
+
+    print("\n  Which AI coding agents should we register the MCP server with?")
+    for i, p in enumerate(SUPPORTED_PLATFORMS, 1):
+        print(f"    {i}. {p}")
+    print(f"    {len(SUPPORTED_PLATFORMS) + 1}. all (recommended)")
+
+    while True:
+        try:
+            answer = input(
+                f"  Pick one or comma-separated [default: all]: "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Defaulting to all.\n")
+            return SUPPORTED_PLATFORMS
+
+        if not answer or answer.lower() == "all":
+            return SUPPORTED_PLATFORMS
+
+        # Parse a list of names or 1-based indices.
+        picked = []
+        ok = True
+        for tok in answer.replace(",", " ").split():
+            tok = tok.strip().lower()
+            if tok.isdigit():
+                idx = int(tok)
+                if idx == len(SUPPORTED_PLATFORMS) + 1:
+                    return SUPPORTED_PLATFORMS
+                if 1 <= idx <= len(SUPPORTED_PLATFORMS):
+                    picked.append(SUPPORTED_PLATFORMS[idx - 1])
+                else:
+                    ok = False
+                    break
+            elif tok in SUPPORTED_PLATFORMS:
+                picked.append(tok)
+            elif tok == "all":
+                return SUPPORTED_PLATFORMS
+            else:
+                ok = False
+                break
+
+        if ok and picked:
+            # Dedupe while preserving order.
+            seen = set()
+            return [p for p in picked if not (p in seen or seen.add(p))]
+
+        print("  Didn't recognise that — try again (e.g. '1,2' or 'claude-code,cursor').")
+
+
+def confirm_install_path(default_path: Path, non_interactive: bool) -> Path:
+    """Confirm or override the OpenClaw home directory."""
+    if non_interactive or not sys.stdin.isatty():
+        return default_path
+
+    try:
+        answer = input(
+            f"  OpenClaw home [{default_path}]: "
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        return default_path
+
+    if not answer:
+        return default_path
+    return Path(answer).expanduser().resolve()
 
 
 def uninstall(openclaw_home: Path, dry_run: bool) -> bool:
@@ -854,6 +981,17 @@ def main():
     parser.add_argument("--skip-tools", action="store_true", help="Skip TOOLS.md patching")
     parser.add_argument("--update", action="store_true", help="Pull latest from git and re-install")
     parser.add_argument("--accept-disclaimer", action="store_true", help="Accept disclaimer without prompt (for CI/scripted installs)")
+    parser.add_argument(
+        "--platform",
+        action="append",
+        choices=SUPPORTED_PLATFORMS + ["all"],
+        help="Target an AI coding agent (repeatable). Use 'all' to register everywhere. Default: prompt interactively, fall back to all in non-TTY.",
+    )
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Skip every interactive prompt — use defaults (all platforms, default OpenClaw home).",
+    )
     args = parser.parse_args()
 
     # ── Disclaimer screen (always shown first, except --verify) ──
@@ -871,6 +1009,11 @@ def main():
             shutil.rmtree(dist_dir)
 
     openclaw_home = args.openclaw_home.expanduser().resolve()
+
+    # v4.6: confirm the install path interactively unless suppressed.
+    non_interactive = args.non_interactive or args.accept_disclaimer
+    if not args.verify and not args.uninstall:
+        openclaw_home = confirm_install_path(openclaw_home, non_interactive)
 
     if not openclaw_home.exists():
         print(f"  OpenClaw home not found: {openclaw_home}")
@@ -904,11 +1047,26 @@ def main():
     print(f"   Platform: {plat}")
     print(f"   Target: {openclaw_home}\n")
 
+    # v4.6: resolve which AI agent platforms we're registering with.
+    # CLI flags > interactive prompt > "all" default.
+    if args.platform:
+        platforms = (
+            list(SUPPORTED_PLATFORMS)
+            if "all" in args.platform
+            else list(dict.fromkeys(args.platform))  # dedupe, preserve order
+        )
+    else:
+        platforms = prompt_platforms(non_interactive)
+
     steps = [
         ("Building MCP server", lambda: build_mcp_server(args.dry_run)),
-        ("Registering MCP server", lambda: register_mcp_server(args.dry_run)),
+        (
+            f"Registering MCP server ({', '.join(platforms) or 'none'})",
+            lambda: register_mcp_server(args.dry_run, platforms),
+        ),
         ("Installing scripts", lambda: install_scripts(openclaw_home, args.dry_run)),
         ("Initializing databases", lambda: init_databases(openclaw_home, args.dry_run)),
+        ("Recording upgrade timestamp", lambda: record_last_upgrade(args.dry_run)),
     ]
     if not args.skip_agents:
         steps.append(("Patching AGENTS.md", lambda: patch_agents_md(openclaw_home, args.dry_run)))

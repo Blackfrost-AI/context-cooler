@@ -1,10 +1,39 @@
-# OpenClaw Context Saver v4.5
+# OpenClaw Context Saver v4.6
 
-**Standalone MCP server for AI agent context optimization. Cut token usage by 70-98%. Built from scratch on the Model Context Protocol — works with Claude Code, Cursor, Gemini CLI, OpenClaw, and any MCP-compatible agent.**
+**Think in code, not text. Cut agent token usage by 70-98%.**
 
-Every AI agent framework has the same problem: they dump full API responses into the context window. A single Playwright snapshot costs 56 KB. Twenty GitHub issues cost 59 KB. One access log — 45 KB. After 30 minutes, 40% of your context is gone.
+A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`.
 
-Context Saver v4.5 is a **standalone Node.js MCP server** with 10 tools: sandboxed execution in 11 languages, intent-driven filtering, FTS5 knowledge indexing, P1-P4 session continuity, multi-messenger delivery (iMessage, Telegram, Slack, Discord), and secret redaction — all in one self-contained package.
+---
+
+## The "Think in Code" philosophy
+
+When an agent needs to analyse a directory, a JSON dump, or 47 source files, the temptation is to *Read* every file and let the model figure it out from raw text. That's how 750 KB of cached context disappears in a single afternoon: every turn re-pays the read cost.
+
+**Don't pull data into the model. Push code at the data and pull back the answer.**
+
+### Canonical example
+
+> "Across these 47 TypeScript files, find every `await` that's missing a `try/catch`."
+
+| Approach | Bytes consumed | Tokens (rough) |
+|---|---|---|
+| `Read` × 47 (`/src/**/*.ts`) | ~700 KB raw text in context | ~175,000 |
+| `ctx_execute` (one shell+grep call, prints summary) | ~3.6 KB summary | ~900 |
+
+The 195× reduction isn't theoretical — it's what the existing OpenClaw morning-brief pipeline measures every day. The agent's job is to **write a script**, not to memorise the repo.
+
+`ctx_execute` runs that script in a sandboxed subprocess (11 supported runtimes), captures stdout, optionally filters with an `intent` keyword, indexes the full output in FTS5 (so the agent can search it later without re-reading), and returns only the compact summary to the context window.
+
+---
+
+## What's new in v4.6
+
+- **Platform adapters** — one-shot installers for Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, and OpenCode. Pick one or all of them at install time. See "[Platform adapters](#platform-adapters)".
+- **Exit classification** — `ctx_execute` now returns a structured `status`: `success | runtime_error | timeout | sandbox_violation | language_unavailable`. Agents can branch on the failure mode instead of parsing stderr.
+- **Local update reminder** — `ctx_doctor` reads `~/.openclaw-context-saver/last-upgrade.txt` (purely local, no network call) and surfaces a "last upgraded N days ago" warning when it's older than 30 days.
+- **Polished installer** — `install.py` now walks you through platform selection and install path interactively (stdlib `input()`, no new dependencies). Non-TTY runs default to all platforms.
+- **Backwards compatible** — every v4.5 tool keeps the same name, schema, and on-success response shape. The new fields (`status`, `exit_code`, `duration_ms`) are additive.
 
 ---
 
@@ -45,31 +74,66 @@ python install.py --update
 ### Installer Options
 
 ```bash
-python3 install.py --dry-run            # Preview changes without writing
-python3 install.py --verify             # Check installation status
-python3 install.py --uninstall          # Remove context-saver wiring
-python3 install.py --accept-disclaimer  # Skip disclaimer prompt (CI/scripts)
-python3 install.py --skip-cron          # Don't patch cron jobs
-python3 install.py --skip-agents        # Don't patch AGENTS.md
-python3 install.py --skip-tools         # Don't patch TOOLS.md
-python3 install.py --openclaw-home /custom/path  # Custom OpenClaw directory
+python3 install.py                              # Interactive — asks which agents to register
+python3 install.py --platform=claude-code       # Register one platform, skip prompt
+python3 install.py --platform=all               # Register every supported agent
+python3 install.py --non-interactive            # Use defaults, no prompts (for CI)
+python3 install.py --dry-run                    # Preview changes without writing
+python3 install.py --verify                     # Check installation status
+python3 install.py --uninstall                  # Remove context-saver wiring
+python3 install.py --update                     # git pull + rebuild + re-register
+python3 install.py --accept-disclaimer          # Skip disclaimer prompt (CI/scripts)
+python3 install.py --skip-cron                  # Don't patch cron jobs
+python3 install.py --skip-agents                # Don't patch AGENTS.md
+python3 install.py --skip-tools                 # Don't patch TOOLS.md
+python3 install.py --openclaw-home /custom/path # Custom OpenClaw directory
 ```
 
 ### What the Installer Does
 
-1. Builds the MCP server (`npm install` + `npx tsc`)
-2. Registers `openclaw-context-saver` in `~/.claude.json` as a stdio MCP server
-3. Copies scripts into `~/.openclaw/workspace/skills/context-saver/`
-4. Initializes SQLite databases (`stats.db` + `sessions.db`)
-5. Patches `AGENTS.md` with mandatory Context Saver Protocol rules
-6. Patches `TOOLS.md` with quick-reference commands
-7. Patches cron jobs to route data-heavy skill calls through context-saver
+1. Builds the MCP server (`npm install` + `npx tsc`).
+2. **Registers `openclaw-context-saver` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
+3. Copies scripts into `~/.openclaw/workspace/skills/context-saver/`.
+4. Initialises SQLite databases (`stats.db` + `sessions.db`).
+5. Patches `AGENTS.md` with mandatory Context Saver Protocol rules.
+6. Patches `TOOLS.md` with quick-reference commands.
+7. Patches cron jobs to route data-heavy skill calls through context-saver.
+8. **Records the install timestamp** in `~/.openclaw-context-saver/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
 
 ### Requirements
 
 - **Node.js 18+** (for the MCP server)
 - **Python 3.8+** (for the installer and helper scripts — stdlib only, no pip dependencies)
 - **SQLite** (bundled with Python and Node.js via better-sqlite3)
+
+---
+
+## Platform adapters
+
+Each adapter writes a single MCP-server entry (`stdio`, command `node`, args `[abs-path-to-dist/server.js]`) into the configuration file the host actually reads. Atomic write: tmp file + rename. Dry-run prints the path it *would* write to, then exits without touching disk.
+
+| Platform | Config file written | Adapter |
+|---|---|---|
+| **Claude Code** | `~/.claude.json` (`mcpServers` map) | `src/adapters/claude-code.ts` |
+| **Cursor** | `~/.cursor/mcp.json` (`mcpServers` map) | `src/adapters/cursor.ts` |
+| **OpenAI Codex CLI** | `~/.codex/mcp_servers.json` (`mcpServers` map) | `src/adapters/codex.ts` |
+| **Gemini CLI** | `~/.gemini/settings.json` (`mcpServers` map) | `src/adapters/gemini.ts` |
+| **OpenCode** | `~/.config/opencode/opencode.json` (`mcp` map) | `src/adapters/opencode.ts` |
+
+Each adapter is under 80 lines and only depends on Node stdlib. They are also reachable from the command line for scripted installs:
+
+```bash
+node dist/adapters/index.js list
+# {"adapters":["claude-code","cursor","codex","gemini","opencode"]}
+
+node dist/adapters/index.js install \
+  --server="$(pwd)/dist/server.js" \
+  --platform=cursor \
+  --dry-run
+# {"platform":"cursor","configPath":"/Users/you/.cursor/mcp.json","ok":true,"detail":"would register openclaw-context-saver -> ..."}
+```
+
+`install.py` calls this CLI under the hood, one platform at a time.
 
 ---
 
@@ -80,7 +144,7 @@ Context Saver is a single MCP server that any MCP-compatible agent auto-discover
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │              ANY MCP-Compatible AI Agent                         │
-│       Claude Code / Cursor / Gemini CLI / OpenClaw / Custom      │
+│   Claude Code / Cursor / Codex / Gemini CLI / OpenCode / Custom  │
 └───────────────────────────┬──────────────────────────────────────┘
                             │
                     MCP Protocol (stdio)
@@ -90,16 +154,16 @@ Context Saver is a single MCP server that any MCP-compatible agent auto-discover
 │                                                                  │
 │   10 Tools:                        Core Libraries:               │
 │   • ctx_execute      (sandbox)     • sandbox.ts  (11 languages)  │
-│   • ctx_execute_file (file inject) • filter.ts   (intent scoring)│
-│   • ctx_batch        (multi-cmd)   • db.ts       (SQLite + FTS5) │
-│   • ctx_search       (FTS5 query)  • chunker.ts  (markdown/JSON) │
-│   • ctx_index        (store data)  • redact.ts   (secret strip)  │
-│   • ctx_fetch_index  (HTTP→index)  • env.ts      (config loader) │
-│   • ctx_session      (P1-P4 state)                               │
+│   • ctx_execute_file (file inject) • exit-classify.ts  (status)  │
+│   • ctx_batch        (multi-cmd)   • filter.ts   (intent scoring)│
+│   • ctx_search       (FTS5 query)  • db.ts       (SQLite + FTS5) │
+│   • ctx_index        (store data)  • chunker.ts  (markdown/JSON) │
+│   • ctx_fetch_index  (HTTP→index)  • redact.ts   (secret strip)  │
+│   • ctx_session      (P1-P4 state) • env.ts      (config loader) │
 │   • ctx_stats        (aggregation)                               │
-│   • ctx_deliver      (4 backends)                                │
-│   • ctx_doctor       (health check)                              │
-│                                                                  │
+│   • ctx_deliver      (4 backends)  Adapters (v4.6):              │
+│   • ctx_doctor       (health check) • claude-code / cursor /     │
+│                                       codex / gemini / opencode  │
 │   Databases:                                                     │
 │   • stats.db    (runs + fts_index)                               │
 │   • sessions.db (events + snapshots)                             │
@@ -117,7 +181,7 @@ Context Saver is a single MCP server that any MCP-compatible agent auto-discover
 
 ### MCP Registration
 
-The installer registers the server in `~/.claude.json`:
+After install, every selected platform's config file ends up with an entry like this (Claude Code shown):
 
 ```json
 {
@@ -125,13 +189,14 @@ The installer registers the server in `~/.claude.json`:
     "openclaw-context-saver": {
       "type": "stdio",
       "command": "node",
-      "args": ["/path/to/openclaw-context-saver/dist/server.js"]
+      "args": ["/path/to/openclaw-context-saver/dist/server.js"],
+      "env": {}
     }
   }
 }
 ```
 
-Any MCP client (Claude Code, Cursor, Gemini CLI, etc.) auto-discovers the 10 tools and calls them natively.
+Any MCP client (Claude Code, Cursor, Codex CLI, Gemini CLI, OpenCode) auto-discovers the 10 tools and calls them natively.
 
 ---
 
@@ -141,12 +206,40 @@ Any MCP client (Claude Code, Cursor, Gemini CLI, etc.) auto-discovers the 10 too
 
 Run code in 11 languages with intent-driven output filtering. Full output is indexed in FTS5; only the filtered summary enters the context window.
 
-**Supported languages:** Python, Node.js, Bash, Ruby, PHP, Perl, Go, Rust, Java, C, TypeScript
+**Supported languages:** JavaScript, TypeScript, Python, Shell, Ruby, PHP, Perl, Go, Rust, R, Elixir.
 
 ```
 ctx_execute(language="python", code="...", intent="check balance")
 → 120 B summary instead of 3 KB raw dump
 ```
+
+**v4.6 structured result.** Every call returns:
+
+```jsonc
+{
+  "success": true,
+  "status": "success",          // success | runtime_error | timeout | sandbox_violation | language_unavailable
+  "exit_code": 0,
+  "duration_ms": 47,
+  "summary": { ... },           // or "output": "..." for non-JSON stdout
+  "raw_bytes": 3127,
+  "summary_bytes": 96,
+  "bytes_saved": 3031,
+  "savings_pct": 96.9,
+  "indexed": true,
+  "stderr": "..."               // present only when stderr is non-empty
+}
+```
+
+Status semantics:
+
+| Status | When |
+|---|---|
+| `success` | Process exited 0. |
+| `runtime_error` | Non-zero exit, no other classifier matched. |
+| `timeout` | Killed because `args.timeout` elapsed. |
+| `sandbox_violation` | Non-zero exit + stderr matched a kernel/sandbox block pattern (`operation not permitted`, `seccomp`, `EPERM`, `sandbox-exec ... deny`). |
+| `language_unavailable` | The runtime executable wasn't on `PATH` (`spawn ENOENT`, `command not found`). |
 
 ### ctx_execute_file — File-Aware Execution
 
@@ -159,7 +252,7 @@ Run multiple commands and/or search queries in a single MCP call. Each command i
 ```
 ctx_batch(commands=[
   {"language": "python", "code": "...", "intent": "summary"},
-  {"language": "bash", "code": "...", "intent": "top 5"}
+  {"language": "shell",  "code": "...", "intent": "top 5"}
 ], queries=["previous error rates"])
 ```
 
@@ -173,19 +266,19 @@ ctx_search(queries=["deployment errors", "position changes"])
 
 ### ctx_index — Store Data in Knowledge Base
 
-Index content (text, JSON, or file paths) into FTS5 with automatic chunking. Markdown is chunked by headings, JSON by key paths, plain text by 50-line blocks. 4096 byte max per chunk, 100KB per entry, 10K max rows with auto-pruning.
+Index content (text, JSON, or file paths) into FTS5 with automatic chunking. Markdown is chunked by headings, JSON by key paths, plain text by 50-line blocks. 4096 byte max per chunk, 100 KB per entry, 10 K max rows with auto-pruning.
 
 ### ctx_fetch_index — HTTP Fetch + Index
 
-Fetch a URL, convert HTML to markdown (via Turndown), and index the content. Follows redirects, enforces 1MB cap.
+Fetch a URL, convert HTML to markdown (via Turndown), and index the content. Follows redirects, enforces 1 MB cap.
 
 ```
-ctx_fetch_index(url="https://docs.example.com/api", label="API docs")
+ctx_fetch_index(url="https://docs.example.com/api", source="API docs")
 ```
 
 ### ctx_session — Session Continuity
 
-Log events with P1-P4 priority, take snapshots before compaction, and restore state after. Snapshots fit within a strict 2KB budget (40% P1 / 30% P2 / 20% P3 / 10% P4).
+Log events with P1-P4 priority, take snapshots before compaction, and restore state after. Snapshots fit within a strict 2 KB budget (40% P1 / 30% P2 / 20% P3 / 10% P4).
 
 ```
 ctx_session(action="log", event_type="decision", priority="high", data={...})
@@ -211,7 +304,9 @@ Send messages via iMessage (macOS), Telegram, Slack, or Discord. Auto-detects av
 
 ### ctx_doctor — Health Check
 
-Checks OPENCLAW_HOME, databases, FTS5 tables, skills directory, 5 language runtimes, mcporter availability, and all 4 delivery backends. Returns a pass/fail report.
+Checks `OPENCLAW_HOME`, databases, FTS5 tables, skills directory, 5 language runtimes, mcporter availability, all 4 delivery backends, **and (v4.6) the local upgrade reminder**. Returns a pass/warn/fail report.
+
+The upgrade reminder reads `~/.openclaw-context-saver/last-upgrade.txt` (an ISO 8601 timestamp written by `install.py`), compares it to today, and surfaces a `warn` if it's older than 30 days. **No network call** — this is purely a local file comparison.
 
 ---
 
@@ -251,7 +346,7 @@ Smart wrapper dict handling: `{"count": 8, "positions": [...]}` → automaticall
 
 ### Layer 4: Session Continuity
 
-P1-P4 priority events survive conversation compaction via 2KB snapshots stored in SQLite. Critical decisions and alerts are always preserved; informational queries are dropped first.
+P1-P4 priority events survive conversation compaction via 2 KB snapshots stored in SQLite. Critical decisions and alerts are always preserved; informational queries are dropped first.
 
 ### Layer 5: Zero-Token Pipelines
 
@@ -264,7 +359,7 @@ launchd → python3 pipeline.py → ctx_execute → ctx_deliver → iMessage/Tel
 
 ---
 
-## Production Results
+## Savings benchmark
 
 Measured on a live OpenClaw instance running 8 positions, 20-symbol movers, daily briefs:
 
@@ -274,6 +369,8 @@ Measured on a live OpenClaw instance running 8 positions, 20-symbol movers, dail
 | `positions` (8 holdings) | 2,739 B | 822 B | **70.0%** |
 | `movers` (20 symbols) | 2,284 B | 367 B | **83.9%** |
 | **Pipeline total** | **5,380 B** | **1,284 B** | **76.1%** |
+
+Across all measured workloads, savings sit in the **70-98% range** — the upper end driven by analyses that would otherwise require pulling whole files (`Read` × N) versus a single `ctx_execute` that emits only the answer.
 
 Zero-token morning brief pipeline: launchd triggers Python directly — **no LLM tokens consumed**.
 
@@ -287,7 +384,7 @@ WITHOUT Context Saver:
   Session compacts → all working state lost → 20 KB cold restart
   Daily token burn: ~750,000 tokens
 
-WITH Context Saver v4.5:
+WITH Context Saver v4.6:
   agent calls ctx_execute → 120 B summary enters context → full data indexed
   agent calls ctx_execute → 300 B filtered enters context → only matching records
   agent calls ctx_batch → 500 B combined → one MCP call, not three
@@ -301,15 +398,18 @@ WITH Context Saver v4.5:
 
 All code is audited and hardened:
 
-- **Sandboxed execution** — Subprocess isolation with env var denylist (30+ dangerous vars), process group kills on Unix, 100MB output cap
-- **No shell=True** — All subprocess calls use list-based args (`shell=False`)
-- **Secret redaction** — API keys, Bearer tokens, Stripe/Alpaca prefixes, and long base64 strings stripped before FTS5 indexing
-- **Path traversal protection** — Skill names validated with `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`
-- **Index size caps** — 100KB per entry, 10K max rows with automatic pruning
-- **Parameterized SQL** — Zero SQL injection vectors
-- **Snapshot budget clamped** — 256-65536 byte range enforced
-- **Phone validation** — E.164 format enforced for iMessage delivery
-- **No third-party runtime dependencies** — Node.js stdlib + better-sqlite3 + @modelcontextprotocol/sdk only
+- **Sandboxed execution** — Subprocess isolation with env var denylist (30+ dangerous vars), process group kills on Unix, 100 MB output cap.
+- **Exit classification** — v4.6 distinguishes timeouts, language-missing, and sandbox blocks from generic runtime errors so agents can react appropriately.
+- **No `shell=True`** — All subprocess calls use list-based args (`shell=False`).
+- **Secret redaction** — API keys, Bearer tokens, Stripe/Alpaca prefixes, and long base64 strings stripped before FTS5 indexing.
+- **Path traversal protection** — Skill names validated with `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`.
+- **Index size caps** — 100 KB per entry, 10 K max rows with automatic pruning.
+- **Parameterized SQL** — Zero SQL injection vectors.
+- **Snapshot budget clamped** — 256-65536 byte range enforced.
+- **Phone validation** — E.164 format enforced for iMessage delivery.
+- **Atomic config writes** — adapters write `tmp + rename` so a crashed install never leaves a half-written `~/.cursor/mcp.json`.
+- **No outbound network calls in the upgrade reminder** — purely a local timestamp comparison.
+- **No third-party runtime dependencies** — `@modelcontextprotocol/sdk`, `better-sqlite3`, `turndown`, `zod`. Nothing else.
 
 ---
 
@@ -334,7 +434,7 @@ openclaw-context-saver/
 ├── src/
 │   ├── server.ts           # MCP server entry point (stdio transport)
 │   ├── tools/
-│   │   ├── execute.ts      # ctx_execute — sandboxed execution
+│   │   ├── execute.ts      # ctx_execute — sandboxed execution + status
 │   │   ├── execute-file.ts # ctx_execute_file — file-aware execution
 │   │   ├── batch.ts        # ctx_batch — multi-command pipeline
 │   │   ├── search.ts       # ctx_search — FTS5 knowledge query
@@ -343,15 +443,25 @@ openclaw-context-saver/
 │   │   ├── session.ts      # ctx_session — P1-P4 session continuity
 │   │   ├── stats.ts        # ctx_stats — usage aggregation
 │   │   ├── deliver.ts      # ctx_deliver — multi-messenger delivery
-│   │   └── doctor.ts       # ctx_doctor — health check
-│   └── lib/
-│       ├── sandbox.ts      # Subprocess runner (11 languages)
-│       ├── filter.ts       # Intent-driven keyword scoring
-│       ├── db.ts           # SQLite + FTS5 connection management
-│       ├── chunker.ts      # Markdown/JSON/text chunking
-│       ├── redact.ts       # Secret redaction patterns
-│       └── env.ts          # Environment and config loader
-├── install.py              # Cross-platform installer
+│   │   └── doctor.ts       # ctx_doctor — health check + upgrade reminder
+│   ├── lib/
+│   │   ├── sandbox.ts      # Subprocess runner (11 languages)
+│   │   ├── exit-classify.ts# v4.6 — status classifier
+│   │   ├── filter.ts       # Intent-driven keyword scoring
+│   │   ├── db.ts           # SQLite + FTS5 connection management
+│   │   ├── chunker.ts      # Markdown/JSON/text chunking
+│   │   ├── redact.ts       # Secret redaction patterns
+│   │   └── env.ts          # Environment and config loader
+│   └── adapters/           # v4.6 — platform installers (≤80 lines each)
+│       ├── claude-code.ts
+│       ├── cursor.ts
+│       ├── codex.ts
+│       ├── gemini.ts
+│       ├── opencode.ts
+│       ├── types.ts
+│       ├── util.ts         # atomic write, JSON read, splice helpers
+│       └── index.ts        # CLI entry point + registry
+├── install.py              # Cross-platform installer (interactive in v4.6)
 ├── package.json            # Node.js dependencies
 ├── tsconfig.json           # TypeScript configuration
 ├── skill.json              # MCP server manifest

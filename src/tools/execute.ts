@@ -4,6 +4,7 @@ import { filterByIntent, filterByFields } from "../lib/filter";
 import { redactSecrets } from "../lib/redact";
 import { recordRun, indexContent } from "../lib/db";
 import { loadEnv } from "../lib/env";
+import { classify } from "../lib/exit-classify";
 import type { SupportedLanguage } from "../types";
 
 export const executeSchema = z.object({
@@ -88,30 +89,40 @@ export async function handleExecute(args: ExecuteInput) {
     args.timeout
   );
 
-  if (result.timedOut) {
+  // v4.6: classify exit into one of five buckets so MCP clients can
+  // differentiate "timed out" from "language missing" from real errors.
+  const classified = classify(result);
+
+  if (classified.status === "timeout") {
     return {
       content: [
         {
           type: "text" as const,
           text: JSON.stringify({
             success: false,
+            status: classified.status,
+            exit_code: classified.exit_code,
+            duration_ms: classified.duration_ms,
             error: `Execution timed out after ${args.timeout}ms`,
-            stderr: result.stderr.slice(0, 500),
+            stderr: classified.stderr.slice(0, 500),
           }),
         },
       ],
     };
   }
 
-  if (result.exitCode !== 0 && !result.stdout) {
+  if (classified.status !== "success" && !result.stdout) {
     return {
       content: [
         {
           type: "text" as const,
           text: JSON.stringify({
             success: false,
-            error: `Exit code ${result.exitCode}`,
-            stderr: result.stderr.slice(0, 1000),
+            status: classified.status,
+            exit_code: classified.exit_code,
+            duration_ms: classified.duration_ms,
+            error: `Exit code ${classified.exit_code} (${classified.status})`,
+            stderr: classified.stderr.slice(0, 1000),
           }),
         },
       ],
@@ -169,7 +180,10 @@ export async function handleExecute(args: ExecuteInput) {
   }
 
   const response: Record<string, unknown> = {
-    success: true,
+    success: classified.status === "success",
+    status: classified.status,
+    exit_code: classified.exit_code,
+    duration_ms: classified.duration_ms,
   };
 
   if (skillName) {
