@@ -1,7 +1,7 @@
 {
-  "name": "openclaw-context-saver",
-  "version": "4.6.0",
-  "description": "MCP server for AI agent context window optimization. Sandboxed execution, intent-driven filtering, FTS5 knowledge base, session continuity, and multi-messenger delivery.",
+  "name": "context-cooler",
+  "version": "5.0.0",
+  "description": "Context Cooler \u2014 eliminate token burn with the coolest MCP on the net. Sandboxed execution in 11 languages, exit classification, FTS5 search, session continuity, multi-messenger delivery, and 5 platform adapters (Claude Code, Cursor, Codex, Gemini, OpenCode).",
   "main": "dist/server.js",
   "bin": {
     "openclaw-context-saver": "dist/server.js"
@@ -25,7 +25,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tlancas25/openclaw-context-saver.git"
+    "url": "git+https://github.com/tlancas25/context-cooler.git"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -38,5 +38,9 @@
     "@types/node": "^22.0.0",
     "@types/turndown": "^5.0.0",
     "typescript": "^5.5.0"
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/tlancas25/context-cooler/issues"
+  },
+  "homepage": "https://github.com/tlancas25/context-cooler#readme"
 }

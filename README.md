@@ -1,8 +1,10 @@
-# OpenClaw Context Saver v4.6
+# Context Cooler v5.0
 
-**Think in code, not text. Cut agent token usage by 70-98%.**
+**Eliminate token burn with the coolest MCP on the net.**
 
-A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`.
+*Burn fewer tokens. Ship cooler agents.*
+
+A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
 
 ---
 
@@ -31,7 +33,7 @@ The 195× reduction isn't theoretical — it's what the existing OpenClaw mornin
 
 - **Platform adapters** — one-shot installers for Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, and OpenCode. Pick one or all of them at install time. See "[Platform adapters](#platform-adapters)".
 - **Exit classification** — `ctx_execute` now returns a structured `status`: `success | runtime_error | timeout | sandbox_violation | language_unavailable`. Agents can branch on the failure mode instead of parsing stderr.
-- **Local update reminder** — `ctx_doctor` reads `~/.openclaw-context-saver/last-upgrade.txt` (purely local, no network call) and surfaces a "last upgraded N days ago" warning when it's older than 30 days.
+- **Local update reminder** — `ctx_doctor` reads `~/.context-cooler/last-upgrade.txt` (purely local, no network call) and surfaces a "last upgraded N days ago" warning when it's older than 30 days.
 - **Polished installer** — `install.py` now walks you through platform selection and install path interactively (stdlib `input()`, no new dependencies). Non-TTY runs default to all platforms.
 - **Backwards compatible** — every v4.5 tool keeps the same name, schema, and on-success response shape. The new fields (`status`, `exit_code`, `duration_ms`) are additive.
 
@@ -43,14 +45,14 @@ The 195× reduction isn't theoretical — it's what the existing OpenClaw mornin
 
 **First-time install:**
 ```bash
-git clone https://github.com/tlancas25/openclaw-context-saver.git
-cd openclaw-context-saver
+git clone https://github.com/tlancas25/context-cooler.git
+cd context-cooler
 python3 install.py
 ```
 
 **Update to the latest version:**
 ```bash
-cd openclaw-context-saver
+cd context-cooler
 python3 install.py --update
 ```
 
@@ -58,14 +60,14 @@ python3 install.py --update
 
 **First-time install:**
 ```powershell
-git clone https://github.com/tlancas25/openclaw-context-saver.git
-cd openclaw-context-saver
+git clone https://github.com/tlancas25/context-cooler.git
+cd context-cooler
 python install.py
 ```
 
 **Update to the latest version:**
 ```powershell
-cd openclaw-context-saver
+cd context-cooler
 python install.py --update
 ```
 
@@ -92,13 +94,13 @@ python3 install.py --openclaw-home /custom/path # Custom OpenClaw directory
 ### What the Installer Does
 
 1. Builds the MCP server (`npm install` + `npx tsc`).
-2. **Registers `openclaw-context-saver` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
+2. **Registers `context-cooler` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
 3. Copies scripts into `~/.openclaw/workspace/skills/context-saver/`.
 4. Initialises SQLite databases (`stats.db` + `sessions.db`).
 5. Patches `AGENTS.md` with mandatory Context Saver Protocol rules.
 6. Patches `TOOLS.md` with quick-reference commands.
 7. Patches cron jobs to route data-heavy skill calls through context-saver.
-8. **Records the install timestamp** in `~/.openclaw-context-saver/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
+8. **Records the install timestamp** in `~/.context-cooler/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
 
 ### Requirements
 
@@ -130,7 +132,7 @@ node dist/adapters/index.js install \
   --server="$(pwd)/dist/server.js" \
   --platform=cursor \
   --dry-run
-# {"platform":"cursor","configPath":"/Users/you/.cursor/mcp.json","ok":true,"detail":"would register openclaw-context-saver -> ..."}
+# {"platform":"cursor","configPath":"/Users/you/.cursor/mcp.json","ok":true,"detail":"would register context-cooler -> ..."}
 ```
 
 `install.py` calls this CLI under the hood, one platform at a time.
@@ -150,7 +152,7 @@ Context Saver is a single MCP server that any MCP-compatible agent auto-discover
                     MCP Protocol (stdio)
                             │
 ┌───────────────────────────▼──────────────────────────────────────┐
-│            openclaw-context-saver (Node.js MCP Server)           │
+│            context-cooler (Node.js MCP Server)           │
 │                                                                  │
 │   10 Tools:                        Core Libraries:               │
 │   • ctx_execute      (sandbox)     • sandbox.ts  (11 languages)  │
@@ -186,10 +188,10 @@ After install, every selected platform's config file ends up with an entry like 
 ```json
 {
   "mcpServers": {
-    "openclaw-context-saver": {
+    "context-cooler": {
       "type": "stdio",
       "command": "node",
-      "args": ["/path/to/openclaw-context-saver/dist/server.js"],
+      "args": ["/path/to/context-cooler/dist/server.js"],
       "env": {}
     }
   }
@@ -306,7 +308,7 @@ Send messages via iMessage (macOS), Telegram, Slack, or Discord. Auto-detects av
 
 Checks `OPENCLAW_HOME`, databases, FTS5 tables, skills directory, 5 language runtimes, mcporter availability, all 4 delivery backends, **and (v4.6) the local upgrade reminder**. Returns a pass/warn/fail report.
 
-The upgrade reminder reads `~/.openclaw-context-saver/last-upgrade.txt` (an ISO 8601 timestamp written by `install.py`), compares it to today, and surfaces a `warn` if it's older than 30 days. **No network call** — this is purely a local file comparison.
+The upgrade reminder reads `~/.context-cooler/last-upgrade.txt` (an ISO 8601 timestamp written by `install.py`), compares it to today, and surfaces a `warn` if it's older than 30 days. **No network call** — this is purely a local file comparison.
 
 ---
 
@@ -430,7 +432,7 @@ All code is audited and hardened:
 ## Project Structure
 
 ```
-openclaw-context-saver/
+context-cooler/
 ├── src/
 │   ├── server.ts           # MCP server entry point (stdio transport)
 │   ├── tools/

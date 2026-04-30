@@ -23,7 +23,7 @@ import { handleDoctor } from "./tools/doctor";
 loadEnv();
 
 const server = new Server(
-  { name: "openclaw-context-saver", version: "4.6.0" },
+  { name: "context-cooler", version: "5.0.0" },
   { capabilities: { tools: {} } }
 );
 

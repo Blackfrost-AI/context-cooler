@@ -11,7 +11,7 @@ import { getStatsDb, getSessionsDb } from "../lib/db";
 // reminder if it's older than 30 days.
 const LAST_UPGRADE_PATH = path.join(
   os.homedir(),
-  ".openclaw-context-saver",
+  ".context-cooler",
   "last-upgrade.txt"
 );
 const UPGRADE_REMINDER_DAYS = 30;

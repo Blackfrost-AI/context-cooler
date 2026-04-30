@@ -1,11 +1,13 @@
 {
-  "name": "context-saver",
-  "version": "4.6.0",
-  "description": "MCP server for AI agent context window optimization — sandboxed execution, intent filtering, FTS5 knowledge base, session continuity, multi-messenger delivery",
+  "name": "context-cooler",
+  "version": "5.0.0",
+  "description": "Context Cooler \u2014 eliminate token burn with the coolest MCP on the net.",
   "type": "mcp-server",
   "transport": "stdio",
   "command": "node",
-  "args": ["dist/server.js"],
+  "args": [
+    "dist/server.js"
+  ],
   "tools": [
     "ctx_execute",
     "ctx_execute_file",
@@ -34,6 +36,14 @@
     "bytes_saved": "number",
     "data": "object"
   },
-  "sla": { "maxLatencyMs": 30000, "availability": 0.99 },
-  "permissions": ["exec:skills", "fs:context/*", "net:http", "net:https"]
+  "sla": {
+    "maxLatencyMs": 30000,
+    "availability": 0.99
+  },
+  "permissions": [
+    "exec:skills",
+    "fs:context/*",
+    "net:http",
+    "net:https"
+  ]
 }

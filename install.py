@@ -37,7 +37,7 @@ VERSION = "4.6.0"
 
 # v4.6: Local timestamp consulted by ctx_doctor for the "you haven't
 # upgraded in 30+ days" reminder. We touch this on every install/upgrade.
-LAST_UPGRADE_PATH = Path.home() / ".openclaw-context-saver" / "last-upgrade.txt"
+LAST_UPGRADE_PATH = Path.home() / ".context-cooler" / "last-upgrade.txt"
 
 # Platform adapters supported by `node dist/adapters/index.js`.
 # Keep this list in sync with src/adapters/index.ts.
@@ -219,7 +219,7 @@ BY PROCEEDING YOU ACKNOWLEDGE:
   4. iMessage delivery (macOS only) uses AppleScript to send messages.
      Telegram/Slack/Discord delivery requires your own API tokens.
 
-Source: https://github.com/tlancas25/openclaw-context-saver
+Source: https://github.com/tlancas25/context-cooler
 License: MIT
 ================================================================================
 """
@@ -256,7 +256,7 @@ def update_from_git() -> bool:
     git_dir = SCRIPT_DIR / ".git"
     if not git_dir.exists():
         print("  This is not a git repository — cannot auto-update.")
-        print("  Re-clone from: https://github.com/tlancas25/openclaw-context-saver.git\n")
+        print("  Re-clone from: https://github.com/tlancas25/context-cooler.git\n")
         return False
 
     print("  Checking for updates...\n")
@@ -662,7 +662,7 @@ def build_mcp_server(dry_run: bool) -> bool:
 
 
 def register_mcp_server(dry_run: bool, platforms: list) -> bool:
-    """Register openclaw-context-saver via the v4.6 platform adapters.
+    """Register context-cooler via the v5 platform adapters.
 
     Shells out to `node dist/adapters/index.js install ...`, one call per
     platform. Each adapter writes a JSON line to stdout describing what it
@@ -731,7 +731,7 @@ def register_mcp_server(dry_run: bool, platforms: list) -> bool:
 
 
 def record_last_upgrade(dry_run: bool) -> bool:
-    """Write the current ISO timestamp to ~/.openclaw-context-saver/last-upgrade.txt.
+    """Write the current ISO timestamp to ~/.context-cooler/last-upgrade.txt.
 
     ctx_doctor reads this file (purely locally — no network call) and
     surfaces a reminder when the timestamp is older than 30 days.
@@ -917,7 +917,7 @@ def verify_installation(openclaw_home: Path) -> dict:
     if claude_json.exists():
         try:
             config = json.loads(claude_json.read_text())
-            report["mcp_registered"] = "openclaw-context-saver" in config.get("mcpServers", {})
+            report["mcp_registered"] = "context-cooler" in config.get("mcpServers", {})
         except json.JSONDecodeError:
             report["mcp_registered"] = False
     else:

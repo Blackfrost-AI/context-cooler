@@ -30,4 +30,4 @@ export interface PlatformAdapter {
   install(ctx: AdapterContext): AdapterResult;
 }
 
-export const SERVER_KEY = "openclaw-context-saver";
+export const SERVER_KEY = "context-cooler";

@@ -1,6 +1,6 @@
 // src/adapters/claude-code.ts — Claude Code MCP installer.
 //
-// Writes an "openclaw-context-saver" entry into ~/.claude.json under
+// Writes an "context-cooler" entry into ~/.claude.json under
 // "mcpServers". This matches the existing install.py behaviour (the
 // installer wrote to ~/.claude.json before v4.6); the adapter formalises
 // it as a reusable, dry-run-aware unit.
