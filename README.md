@@ -1,4 +1,4 @@
-# Context Cooler v5.0
+# Context Cooler v5.1
 
 **Eliminate token burn with the coolest MCP on the net.**
 
@@ -28,6 +28,11 @@ The 195× reduction isn't theoretical — it's what the existing OpenClaw mornin
 `ctx_execute` runs that script in a sandboxed subprocess (11 supported runtimes), captures stdout, optionally filters with an `intent` keyword, indexes the full output in FTS5 (so the agent can search it later without re-reading), and returns only the compact summary to the context window.
 
 ---
+
+## What's new in v5.1
+
+- **Installs on any machine — OpenClaw no longer required.** `install.py` previously aborted with `OpenClaw home not found` if `~/.openclaw` was missing. The installer now auto-creates the data directory, defaults to running only the universally relevant steps (build MCP server, register adapter, init SQLite DBs, record upgrade timestamp), and skips the OpenClaw-specific script copy + AGENTS.md / TOOLS.md / cron patches when no OpenClaw workspace is detected. Pure no-op for non-OpenClaw users; identical behaviour for OpenClaw users.
+- **`--data-dir` flag** added as a clearer alias for `--openclaw-home` (the old flag still works for back-compat).
 
 ## What's new in v4.6
 
@@ -88,19 +93,24 @@ python3 install.py --accept-disclaimer          # Skip disclaimer prompt (CI/scr
 python3 install.py --skip-cron                  # Don't patch cron jobs
 python3 install.py --skip-agents                # Don't patch AGENTS.md
 python3 install.py --skip-tools                 # Don't patch TOOLS.md
-python3 install.py --openclaw-home /custom/path # Custom OpenClaw directory
+python3 install.py --data-dir /custom/path      # Custom data directory (alias: --openclaw-home)
 ```
 
 ### What the Installer Does
 
+**Always (every machine):**
+
 1. Builds the MCP server (`npm install` + `npx tsc`).
 2. **Registers `context-cooler` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
-3. Copies scripts into `~/.openclaw/workspace/skills/context-saver/`.
-4. Initialises SQLite databases (`stats.db` + `sessions.db`).
-5. Patches `AGENTS.md` with mandatory Context Saver Protocol rules.
-6. Patches `TOOLS.md` with quick-reference commands.
-7. Patches cron jobs to route data-heavy skill calls through context-saver.
-8. **Records the install timestamp** in `~/.context-cooler/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
+3. Initialises SQLite databases (`stats.db` + `sessions.db`) under the data directory (default `~/.openclaw`, override with `--data-dir`). The directory is auto-created — no need for OpenClaw to be installed.
+4. **Records the install timestamp** in `~/.context-cooler/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
+
+**Optional — only when the OpenClaw workspace is detected** (skipped automatically on machines without OpenClaw):
+
+5. Copies the legacy python helpers into `~/.openclaw/workspace/skills/context-saver/`.
+6. Patches `AGENTS.md` with mandatory Context Saver Protocol rules.
+7. Patches `TOOLS.md` with quick-reference commands.
+8. Patches cron jobs to route data-heavy skill calls through context-saver.
 
 ### Requirements
 

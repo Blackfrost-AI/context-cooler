@@ -1,6 +1,6 @@
 {
   "name": "context-cooler",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "Context Cooler \u2014 eliminate token burn with the coolest MCP on the net. Sandboxed execution in 11 languages, exit classification, FTS5 search, session continuity, multi-messenger delivery, and 5 platform adapters (Claude Code, Cursor, Codex, Gemini, OpenCode).",
   "main": "dist/server.js",
   "bin": {

@@ -1,6 +1,6 @@
 {
   "name": "context-cooler",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "Context Cooler \u2014 eliminate token burn with the coolest MCP on the net.",
   "type": "mcp-server",
   "transport": "stdio",

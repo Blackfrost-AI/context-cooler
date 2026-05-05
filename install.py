@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-OpenClaw Context Saver — Automated Installer
+Context Cooler — Automated Installer
 
 Usage:
-    python3 install.py              # Install with defaults (~/.openclaw)
+    python3 install.py              # Build + register MCP server (works on any machine)
     python3 install.py --dry-run    # Preview changes without writing
-    python3 install.py --uninstall  # Remove context-saver wiring
-    python3 install.py --openclaw-home /path/to/openclaw  # Custom path
+    python3 install.py --uninstall  # Remove OpenClaw integration wiring (if any)
+    python3 install.py --data-dir /path/to/data  # Override data directory
 
-What it does:
-    1. Copies/symlinks scripts into ~/.openclaw/workspace/skills/context-saver/
-    2. Patches AGENTS.md with the Context Saver Protocol (mandatory rules)
-    3. Patches TOOLS.md with quick-reference commands
-    4. Patches existing cron jobs to route data-heavy skill calls through ctx_run.py
-    5. Creates the context/ directory and initializes SQLite databases
+What it does (every install):
+    1. Builds the standalone MCP server (npm install + tsc → dist/server.js)
+    2. Registers the MCP server with the AI agents you select
+       (claude-code / cursor / codex / gemini / opencode)
+    3. Initializes the SQLite databases under the data dir (default ~/.openclaw,
+       auto-created — works fine on machines without OpenClaw)
+
+Optional (skipped automatically if the target files don't exist):
+    4. Patches OpenClaw AGENTS.md / TOOLS.md / cron jobs to route data-heavy
+       skills through context-cooler. Pure no-op for non-OpenClaw users.
 """
 
 import argparse
@@ -33,7 +37,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "4.6.0"
+VERSION = "5.1.0"
 
 # v4.6: Local timestamp consulted by ctx_doctor for the "you haven't
 # upgraded in 30+ days" reminder. We touch this on every install/upgrade.
@@ -193,7 +197,7 @@ python3 ~/.openclaw/workspace/skills/context-saver/scripts/ctx_stats.py
 
 DISCLAIMER = """\
 ================================================================================
-            OpenClaw Context Saver — Disclaimer & Intended Use
+                  Context Cooler — Disclaimer & Intended Use
 ================================================================================
 
 This software is an MCP (Model Context Protocol) server designed to optimize
@@ -212,8 +216,9 @@ BY PROCEEDING YOU ACKNOWLEDGE:
   1. This tool executes code in sandboxed subprocesses on your machine.
      While env vars are filtered and output is capped, you are responsible
      for reviewing what code your AI agents run through it.
-  2. Database files (SQLite) are created in ~/.openclaw/context/ to persist
-     indexed data and session state across conversations.
+  2. SQLite database files are created under the data directory (default
+     ~/.openclaw, override with --data-dir) to persist indexed data and
+     session state across conversations.
   3. This software is provided "AS IS" under the MIT License, without
      warranty of any kind.
   4. iMessage delivery (macOS only) uses AppleScript to send messages.
@@ -467,8 +472,9 @@ def init_databases(openclaw_home: Path, dry_run: bool) -> bool:
 def patch_file(filepath: Path, marker: str, patch: str, insert_before: str = None, dry_run: bool = False) -> bool:
     """Insert a patch block into a file if the marker isn't already present."""
     if not filepath.exists():
-        log(f"File not found: {filepath}", "WARN")
-        return False
+        # Optional integration target — non-OpenClaw users won't have these.
+        log(f"Not present, skipping: {filepath}", "SKIP")
+        return True
 
     content = filepath.read_text()
 
@@ -809,13 +815,13 @@ def prompt_platforms(non_interactive: bool, default_all: bool = True) -> list:
 
 
 def confirm_install_path(default_path: Path, non_interactive: bool) -> Path:
-    """Confirm or override the OpenClaw home directory."""
+    """Confirm or override the data directory (where SQLite DBs live)."""
     if non_interactive or not sys.stdin.isatty():
         return default_path
 
     try:
         answer = input(
-            f"  OpenClaw home [{default_path}]: "
+            f"  Data directory [{default_path}]: "
         ).strip()
     except (EOFError, KeyboardInterrupt):
         return default_path
@@ -955,23 +961,25 @@ def main():
     py_cmd = "python" if IS_WINDOWS else "python3"
 
     parser = argparse.ArgumentParser(
-        description="OpenClaw Context Saver — Automated Installer",
+        description="Context Cooler — Automated Installer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=dedent(f"""
         Examples:
-            {py_cmd} install.py                          # Install with defaults
-            {py_cmd} install.py --update                 # Pull latest + re-install
-            {py_cmd} install.py --dry-run                # Preview changes
-            {py_cmd} install.py --uninstall              # Remove wiring
-            {py_cmd} install.py --openclaw-home /custom  # Custom path
-            {py_cmd} install.py --verify                 # Check status
+            {py_cmd} install.py                       # Install with defaults
+            {py_cmd} install.py --update              # Pull latest + re-install
+            {py_cmd} install.py --dry-run             # Preview changes
+            {py_cmd} install.py --uninstall           # Remove OpenClaw wiring
+            {py_cmd} install.py --data-dir /custom    # Custom data directory
+            {py_cmd} install.py --verify              # Check status
         """),
     )
     parser.add_argument(
+        "--data-dir",
         "--openclaw-home",
+        dest="data_dir",
         type=Path,
         default=Path(os.environ.get("OPENCLAW_HOME", Path.home() / ".openclaw")),
-        help="Path to OpenClaw home directory (default: ~/.openclaw)",
+        help="Data directory for SQLite DBs (default: $OPENCLAW_HOME or ~/.openclaw, auto-created)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     parser.add_argument("--uninstall", action="store_true", help="Remove context-saver wiring")
@@ -1008,21 +1016,31 @@ def main():
         if dist_dir.exists():
             shutil.rmtree(dist_dir)
 
-    openclaw_home = args.openclaw_home.expanduser().resolve()
+    openclaw_home = args.data_dir.expanduser().resolve()
 
     # v4.6: confirm the install path interactively unless suppressed.
     non_interactive = args.non_interactive or args.accept_disclaimer
     if not args.verify and not args.uninstall:
         openclaw_home = confirm_install_path(openclaw_home, non_interactive)
 
+    # Data directory: reused by the TS runtime to store stats.db / sessions.db.
+    # We auto-create it so non-OpenClaw users (Claude Code, Cursor, etc.) install
+    # cleanly. The default path stays ~/.openclaw for back-compat with existing
+    # OpenClaw installs that already point OPENCLAW_HOME there.
     if not openclaw_home.exists():
-        print(f"  OpenClaw home not found: {openclaw_home}")
-        print("   Set OPENCLAW_HOME or use --openclaw-home /path/to/openclaw")
-        sys.exit(1)
+        if args.dry_run:
+            print(f"  Would create data dir: {openclaw_home}")
+        else:
+            try:
+                openclaw_home.mkdir(parents=True, exist_ok=True)
+                print(f"  Created data dir: {openclaw_home}")
+            except OSError as err:
+                print(f"  Could not create data dir {openclaw_home}: {err}")
+                sys.exit(1)
 
     # Verify mode
     if args.verify:
-        print(f"\n🔍 Context Saver Installation Status ({openclaw_home})\n")
+        print(f"\n🔍 Context Cooler Installation Status ({openclaw_home})\n")
         report = verify_installation(openclaw_home)
         for key, status in report.items():
             icon = "✅" if status else ("⏭️" if status is None else "❌")
@@ -1043,9 +1061,9 @@ def main():
     # Install mode
     mode = "DRY RUN" if args.dry_run else "INSTALL"
     plat = "Windows" if IS_WINDOWS else ("macOS" if IS_MACOS else ("Linux" if IS_LINUX else sys.platform))
-    print(f"\n  Context Saver Installer v{VERSION} [{mode}]")
+    print(f"\n  Context Cooler Installer v{VERSION} [{mode}]")
     print(f"   Platform: {plat}")
-    print(f"   Target: {openclaw_home}\n")
+    print(f"   Data dir: {openclaw_home}\n")
 
     # v4.6: resolve which AI agent platforms we're registering with.
     # CLI flags > interactive prompt > "all" default.
@@ -1058,22 +1076,27 @@ def main():
     else:
         platforms = prompt_platforms(non_interactive)
 
+    # OpenClaw integration is opt-in: detect by presence of workspace/AGENTS.md.
+    # When absent, we skip the python-script copy and the *.md / cron patches.
+    has_openclaw_workspace = (openclaw_home / "workspace" / "AGENTS.md").exists()
+
     steps = [
         ("Building MCP server", lambda: build_mcp_server(args.dry_run)),
         (
             f"Registering MCP server ({', '.join(platforms) or 'none'})",
             lambda: register_mcp_server(args.dry_run, platforms),
         ),
-        ("Installing scripts", lambda: install_scripts(openclaw_home, args.dry_run)),
         ("Initializing databases", lambda: init_databases(openclaw_home, args.dry_run)),
         ("Recording upgrade timestamp", lambda: record_last_upgrade(args.dry_run)),
     ]
-    if not args.skip_agents:
-        steps.append(("Patching AGENTS.md", lambda: patch_agents_md(openclaw_home, args.dry_run)))
-    if not args.skip_tools:
-        steps.append(("Patching TOOLS.md", lambda: patch_tools_md(openclaw_home, args.dry_run)))
-    if not args.skip_cron:
-        steps.append(("Patching cron jobs", lambda: patch_cron_jobs(openclaw_home, args.dry_run)))
+    if has_openclaw_workspace:
+        steps.insert(2, ("Installing scripts", lambda: install_scripts(openclaw_home, args.dry_run)))
+        if not args.skip_agents:
+            steps.append(("Patching AGENTS.md", lambda: patch_agents_md(openclaw_home, args.dry_run)))
+        if not args.skip_tools:
+            steps.append(("Patching TOOLS.md", lambda: patch_tools_md(openclaw_home, args.dry_run)))
+        if not args.skip_cron:
+            steps.append(("Patching cron jobs", lambda: patch_cron_jobs(openclaw_home, args.dry_run)))
 
     all_ok = True
     for label, fn in steps:
@@ -1086,16 +1109,15 @@ def main():
         print("  Dry run complete. No files were modified.")
         print(f"   Run without --dry-run to apply changes.\n")
     elif all_ok:
-        print("  Context Saver installed and wired!")
-        if IS_MACOS:
-            print("   Restart your OpenClaw gateway to pick up changes:")
-            print("   launchctl stop ai.openclaw.gateway && launchctl start ai.openclaw.gateway\n")
-        elif IS_WINDOWS:
+        print("  Context Cooler installed!")
+        if IS_WINDOWS:
             show_windows_post_install()
-        elif IS_LINUX:
-            print("   Restart your OpenClaw gateway or Claude Code to pick up changes.\n")
         else:
-            print("   Restart your AI agent to pick up changes.\n")
+            print("   Restart your AI agent (Claude Code, Cursor, etc.) to pick up the MCP server.\n")
+            # Legacy OpenClaw gateway hint, only relevant if it exists
+            if (Path.home() / "Library" / "LaunchAgents" / "ai.openclaw.gateway.plist").exists():
+                print("   OpenClaw gateway detected — restart it too:")
+                print("   launchctl stop ai.openclaw.gateway && launchctl start ai.openclaw.gateway\n")
     else:
         print("  Installation completed with warnings. Check output above.\n")
 
