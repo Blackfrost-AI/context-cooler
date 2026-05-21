@@ -9,6 +9,7 @@ import { CursorAdapter } from "./cursor";
 import { CodexAdapter } from "./codex";
 import { GeminiAdapter } from "./gemini";
 import { OpenCodeAdapter } from "./opencode";
+import { PretzelPorterAdapter } from "./pretzel-porter";
 import {
   AdapterContext,
   AdapterResult,
@@ -21,6 +22,7 @@ export const ADAPTERS: PlatformAdapter[] = [
   new CodexAdapter(),
   new GeminiAdapter(),
   new OpenCodeAdapter(),
+  new PretzelPorterAdapter(),
 ];
 
 export const ADAPTER_IDS = ADAPTERS.map((a) => a.id);

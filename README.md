@@ -29,6 +29,18 @@ The 195× reduction isn't theoretical — it's what the existing OpenClaw mornin
 
 ---
 
+## What's new in v5.2
+
+- **Pretzel Porter adapter — Context Cooler now targets self-hosted LLMs.**
+  [Pretzel Porter](https://github.com/tlancas25/Pretzel-Porter) is a Claude
+  Code-style terminal agent that runs entirely on a local or privately-hosted
+  Ollama model. It is the first *self-hosted-LLM* target: a small local model
+  has a far smaller context window than a frontier model, so the "push code at
+  the data" approach pays off even harder there — keeping raw files out of a
+  tight window is the difference between a task fitting and not. Pick
+  `pretzel-porter` at install time like any other platform; the adapter writes
+  the MCP entry into `~/.pretzel-porter/agent.config.local.json`.
+
 ## What's new in v5.1
 
 - **Installs on any machine — OpenClaw no longer required.** `install.py` previously aborted with `OpenClaw home not found` if `~/.openclaw` was missing. The installer now auto-creates the data directory, defaults to running only the universally relevant steps (build MCP server, register adapter, init SQLite DBs, record upgrade timestamp), and skips the OpenClaw-specific script copy + AGENTS.md / TOOLS.md / cron patches when no OpenClaw workspace is detected. Pure no-op for non-OpenClaw users; identical behaviour for OpenClaw users.
@@ -101,7 +113,7 @@ python3 install.py --data-dir /custom/path      # Custom data directory (alias: 
 **Always (every machine):**
 
 1. Builds the MCP server (`npm install` + `npx tsc`).
-2. **Registers `context-cooler` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
+2. **Registers `context-cooler` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode, Pretzel Porter). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
 3. Initialises SQLite databases (`stats.db` + `sessions.db`) under the data directory (default `~/.openclaw`, override with `--data-dir`). The directory is auto-created — no need for OpenClaw to be installed.
 4. **Records the install timestamp** in `~/.context-cooler/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
 
@@ -131,12 +143,13 @@ Each adapter writes a single MCP-server entry (`stdio`, command `node`, args `[a
 | **OpenAI Codex CLI** | `~/.codex/mcp_servers.json` (`mcpServers` map) | `src/adapters/codex.ts` |
 | **Gemini CLI** | `~/.gemini/settings.json` (`mcpServers` map) | `src/adapters/gemini.ts` |
 | **OpenCode** | `~/.config/opencode/opencode.json` (`mcp` map) | `src/adapters/opencode.ts` |
+| **Pretzel Porter** | `~/.pretzel-porter/agent.config.local.json` (`mcpServers` map) | `src/adapters/pretzel-porter.ts` |
 
 Each adapter is under 80 lines and only depends on Node stdlib. They are also reachable from the command line for scripted installs:
 
 ```bash
 node dist/adapters/index.js list
-# {"adapters":["claude-code","cursor","codex","gemini","opencode"]}
+# {"adapters":["claude-code","cursor","codex","gemini","opencode","pretzel-porter"]}
 
 node dist/adapters/index.js install \
   --server="$(pwd)/dist/server.js" \
