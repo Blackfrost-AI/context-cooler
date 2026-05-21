@@ -11,7 +11,7 @@ Usage:
 What it does (every install):
     1. Builds the standalone MCP server (npm install + tsc → dist/server.js)
     2. Registers the MCP server with the AI agents you select
-       (claude-code / cursor / codex / gemini / opencode)
+       (claude-code / cursor / codex / gemini / opencode / pretzel-porter)
     3. Initializes the SQLite databases under the data dir (default ~/.openclaw,
        auto-created — works fine on machines without OpenClaw)
 
@@ -37,7 +37,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "5.1.0"
+VERSION = "5.2.0"
 
 # v4.6: Local timestamp consulted by ctx_doctor for the "you haven't
 # upgraded in 30+ days" reminder. We touch this on every install/upgrade.
@@ -45,7 +45,14 @@ LAST_UPGRADE_PATH = Path.home() / ".context-cooler" / "last-upgrade.txt"
 
 # Platform adapters supported by `node dist/adapters/index.js`.
 # Keep this list in sync with src/adapters/index.ts.
-SUPPORTED_PLATFORMS = ["claude-code", "cursor", "codex", "gemini", "opencode"]
+SUPPORTED_PLATFORMS = [
+    "claude-code",
+    "cursor",
+    "codex",
+    "gemini",
+    "opencode",
+    "pretzel-porter",
+]
 
 # Skills whose output should be routed through context-saver
 DATA_HEAVY_SKILLS = [
