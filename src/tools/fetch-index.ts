@@ -4,14 +4,7 @@ import * as http from "http";
 import { indexContent } from "../lib/db";
 import { redactSecrets } from "../lib/redact";
 import { autoChunk } from "../lib/chunker";
-
-// We'll try to load turndown, fall back to basic HTML stripping
-let TurndownService: any;
-try {
-  TurndownService = require("turndown");
-} catch {
-  TurndownService = null;
-}
+import { htmlToMarkdown } from "../lib/html";
 
 export const fetchIndexSchema = z.object({
   url: z.string().describe("The URL to fetch and index"),
@@ -55,24 +48,6 @@ async function fetchUrl(url: string): Promise<{ body: string; contentType: strin
       reject(new Error("Request timed out"));
     });
   });
-}
-
-function htmlToMarkdown(html: string): string {
-  if (TurndownService) {
-    const td = new TurndownService({
-      headingStyle: "atx",
-      codeBlockStyle: "fenced",
-    });
-    return td.turndown(html);
-  }
-
-  // Basic HTML stripping fallback
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 export async function handleFetchIndex(args: FetchIndexInput) {

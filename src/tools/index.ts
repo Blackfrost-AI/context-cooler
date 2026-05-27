@@ -3,6 +3,7 @@ import * as fs from "fs";
 import { indexContent } from "../lib/db";
 import { redactSecrets } from "../lib/redact";
 import { autoChunk } from "../lib/chunker";
+import { htmlToMarkdown, isHtmlDocument } from "../lib/html";
 
 export const indexSchema = z.object({
   content: z
@@ -63,6 +64,15 @@ export async function handleIndex(args: IndexInput) {
     };
   }
 
+  // If the input looks like a full HTML document, convert to Markdown
+  // so autoChunk's heading regex can detect sections instead of falling
+  // back to 50-line plaintext windows. Mirrors what ctx_fetch_index
+  // already does on Content-Type=text/html responses.
+  const htmlDetected = isHtmlDocument(text, args.path);
+  if (htmlDetected) {
+    text = htmlToMarkdown(text);
+  }
+
   const redacted = redactSecrets(text);
   const chunks = autoChunk(redacted, source);
 
@@ -81,6 +91,7 @@ export async function handleIndex(args: IndexInput) {
           source,
           chunks_indexed: indexed,
           total_bytes: Buffer.byteLength(text, "utf-8"),
+          html_converted: htmlDetected,
           message: `Indexed ${indexed} chunks from '${source}'. Use ctx_search to retrieve.`,
         }),
       },
