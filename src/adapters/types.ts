@@ -15,7 +15,7 @@ export interface AdapterContext {
 }
 
 export interface AdapterResult {
-  // Stable platform id (claude-code | cursor | codex | gemini | opencode).
+  // Stable platform id (claude-code | cursor | codex | gemini | opencode | pretzel-porter | grok).
   platform: string;
   // Absolute path the adapter wrote (or would write) to.
   configPath: string;

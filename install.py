@@ -11,8 +11,8 @@ Usage:
 What it does (every install):
     1. Builds the standalone MCP server (npm install + tsc → dist/server.js)
     2. Registers the MCP server with the AI agents you select
-       (claude-code / cursor / codex / gemini / opencode / pretzel-porter)
-    3. Initializes the SQLite databases under the data dir (default ~/.openclaw,
+       (claude-code / cursor / codex / gemini / opencode / pretzel-porter / grok)
+    3. Initializes the SQLite databases under the data dir (default ~/.context-cooler,
        auto-created — works fine on machines without OpenClaw)
 
 Optional (skipped automatically if the target files don't exist):
@@ -52,6 +52,7 @@ SUPPORTED_PLATFORMS = [
     "gemini",
     "opencode",
     "pretzel-porter",
+    "grok",
 ]
 
 # Skills whose output should be routed through context-saver
@@ -224,7 +225,7 @@ BY PROCEEDING YOU ACKNOWLEDGE:
      While env vars are filtered and output is capped, you are responsible
      for reviewing what code your AI agents run through it.
   2. SQLite database files are created under the data directory (default
-     ~/.openclaw, override with --data-dir) to persist indexed data and
+     ~/.context-cooler, override with --data-dir) to persist indexed data and
      session state across conversations.
   3. This software is provided "AS IS" under the MIT License, without
      warranty of any kind.
@@ -344,7 +345,7 @@ def show_windows_post_install():
      ─────────────────────────────────
      iMessage delivery uses macOS AppleScript and is not available on
      Windows. You can still use Telegram, Slack, and Discord delivery
-     backends. Set up your tokens in ~/.openclaw/.env:
+     backends. Set up your tokens in ~/.context-cooler/.env:
        TELEGRAM_BOT_TOKEN=your_token
        TELEGRAM_CHAT_ID=your_chat_id
        SLACK_WEBHOOK_URL=https://hooks.slack.com/...
@@ -818,7 +819,7 @@ def prompt_platforms(non_interactive: bool, default_all: bool = True) -> list:
             seen = set()
             return [p for p in picked if not (p in seen or seen.add(p))]
 
-        print("  Didn't recognise that — try again (e.g. '1,2' or 'claude-code,cursor').")
+        print("  Didn't recognise that — try again (e.g. '1,2' or 'claude-code,cursor,grok').")
 
 
 def confirm_install_path(default_path: Path, non_interactive: bool) -> Path:
@@ -985,8 +986,8 @@ def main():
         "--openclaw-home",
         dest="data_dir",
         type=Path,
-        default=Path(os.environ.get("OPENCLAW_HOME", Path.home() / ".openclaw")),
-        help="Data directory for SQLite DBs (default: $OPENCLAW_HOME or ~/.openclaw, auto-created)",
+        default=Path(os.environ.get("OPENCLAW_HOME", Path.home() / ".context-cooler")),
+        help="Data directory for SQLite DBs (default: $OPENCLAW_HOME or ~/.context-cooler, auto-created)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     parser.add_argument("--uninstall", action="store_true", help="Remove context-saver wiring")
@@ -1032,7 +1033,7 @@ def main():
 
     # Data directory: reused by the TS runtime to store stats.db / sessions.db.
     # We auto-create it so non-OpenClaw users (Claude Code, Cursor, etc.) install
-    # cleanly. The default path stays ~/.openclaw for back-compat with existing
+    # cleanly. The default path is now ~/.context-cooler (neutral for Grok/Cursor/etc users); ~/.openclaw still honoured via $OPENCLAW_HOME or --data-dir for existing OpenClaw installs.
     # OpenClaw installs that already point OPENCLAW_HOME there.
     if not openclaw_home.exists():
         if args.dry_run:

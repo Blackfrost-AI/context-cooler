@@ -47,13 +47,13 @@ export async function handleDoctor(_args: DoctorInput) {
   const home = getOpenClawHome();
   if (fs.existsSync(home)) {
     checks.push({
-      name: "OPENCLAW_HOME",
+      name: "Data directory",
       status: "ok",
       detail: home,
     });
   } else {
     checks.push({
-      name: "OPENCLAW_HOME",
+      name: "Data directory",
       status: "fail",
       detail: `${home} does not exist`,
     });

@@ -8,7 +8,7 @@ let _envLoaded = false;
 export function getOpenClawHome(): string {
   if (_openclawHome) return _openclawHome;
   _openclawHome =
-    process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
+    process.env.OPENCLAW_HOME || path.join(os.homedir(), ".context-cooler");
   return _openclawHome;
 }
 
