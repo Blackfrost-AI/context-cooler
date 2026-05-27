@@ -10,6 +10,7 @@ import { CodexAdapter } from "./codex";
 import { GeminiAdapter } from "./gemini";
 import { OpenCodeAdapter } from "./opencode";
 import { PretzelPorterAdapter } from "./pretzel-porter";
+import { GrokAdapter } from "./grok";
 import {
   AdapterContext,
   AdapterResult,
@@ -23,6 +24,7 @@ export const ADAPTERS: PlatformAdapter[] = [
   new GeminiAdapter(),
   new OpenCodeAdapter(),
   new PretzelPorterAdapter(),
+  new GrokAdapter(),
 ];
 
 export const ADAPTER_IDS = ADAPTERS.map((a) => a.id);

@@ -218,7 +218,7 @@ export function findSkillScript(skillName: string): string | null {
   }
 
   const skillsDir = path.join(
-    process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
+    process.env.OPENCLAW_HOME || path.join(os.homedir(), ".context-cooler"),
     "workspace",
     "skills",
     skillName,

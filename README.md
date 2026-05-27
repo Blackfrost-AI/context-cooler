@@ -1,10 +1,10 @@
-# Context Cooler v5.1
+# Context Cooler v5.2
 
 **Eliminate token burn with the coolest MCP on the net.**
 
 *Burn fewer tokens. Ship cooler agents.*
 
-A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
+A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Grok CLI — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
 
 ---
 
@@ -31,24 +31,17 @@ The 195× reduction isn't theoretical — it's what the existing OpenClaw mornin
 
 ## What's new in v5.2
 
-- **Pretzel Porter adapter — Context Cooler now targets self-hosted LLMs.**
-  [Pretzel Porter](https://github.com/tlancas25/Pretzel-Porter) is a Claude
-  Code-style terminal agent that runs entirely on a local or privately-hosted
-  Ollama model. It is the first *self-hosted-LLM* target: a small local model
-  has a far smaller context window than a frontier model, so the "push code at
-  the data" approach pays off even harder there — keeping raw files out of a
-  tight window is the difference between a task fitting and not. Pick
-  `pretzel-porter` at install time like any other platform; the adapter writes
-  the MCP entry into `~/.pretzel-porter/agent.config.local.json`.
+- **Pretzel Porter adapter** — Context Cooler now targets self-hosted LLMs. [Pretzel Porter](https://github.com/tlancas25/Pretzel-Porter) is a Claude Code-style terminal agent that runs entirely on a local or privately-hosted Ollama model. Pick `pretzel-porter` at install time; the adapter writes into `~/.pretzel-porter/agent.config.local.json`.
+- **Grok CLI native adapter** — first-class support for xAI Grok CLI / Build TUI. `install.py --platform=grok` (or interactive) now writes a native `[mcp_servers.context-cooler]` table to `~/.grok/config.toml` (stdlib TOML, no extra deps). Works alongside the existing `.claude.json` compatibility layer; enables project `.grok/config.toml` too.
 
 ## What's new in v5.1
 
-- **Installs on any machine — OpenClaw no longer required.** `install.py` previously aborted with `OpenClaw home not found` if `~/.openclaw` was missing. The installer now auto-creates the data directory, defaults to running only the universally relevant steps (build MCP server, register adapter, init SQLite DBs, record upgrade timestamp), and skips the OpenClaw-specific script copy + AGENTS.md / TOOLS.md / cron patches when no OpenClaw workspace is detected. Pure no-op for non-OpenClaw users; identical behaviour for OpenClaw users.
+- **Installs on any machine — OpenClaw no longer required.** `install.py` previously aborted with `OpenClaw home not found` if no data dir existed. The installer now defaults to `~/.context-cooler` (neutral, great for Grok CLI / Cursor / Claude Code standalone users), auto-creates it, runs only the universal steps (build + register MCP + dbs + timestamp), and skips OpenClaw-specific patches unless an OpenClaw workspace is detected. Back-compat: $OPENCLAW_HOME or --data-dir still works for existing OpenClaw users.
 - **`--data-dir` flag** added as a clearer alias for `--openclaw-home` (the old flag still works for back-compat).
 
 ## What's new in v4.6
 
-- **Platform adapters** — one-shot installers for Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, and OpenCode. Pick one or all of them at install time. See "[Platform adapters](#platform-adapters)".
+- **Platform adapters** — one-shot installers for Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Pretzel Porter, and Grok CLI. Pick one or all of them at install time. See "[Platform adapters](#platform-adapters)".
 - **Exit classification** — `ctx_execute` now returns a structured `status`: `success | runtime_error | timeout | sandbox_violation | language_unavailable`. Agents can branch on the failure mode instead of parsing stderr.
 - **Local update reminder** — `ctx_doctor` reads `~/.context-cooler/last-upgrade.txt` (purely local, no network call) and surfaces a "last upgraded N days ago" warning when it's older than 30 days.
 - **Polished installer** — `install.py` now walks you through platform selection and install path interactively (stdlib `input()`, no new dependencies). Non-TTY runs default to all platforms.
@@ -113,8 +106,8 @@ python3 install.py --data-dir /custom/path      # Custom data directory (alias: 
 **Always (every machine):**
 
 1. Builds the MCP server (`npm install` + `npx tsc`).
-2. **Registers `context-cooler` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode, Pretzel Porter). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
-3. Initialises SQLite databases (`stats.db` + `sessions.db`) under the data directory (default `~/.openclaw`, override with `--data-dir`). The directory is auto-created — no need for OpenClaw to be installed.
+2. **Registers `context-cooler` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode, Pretzel Porter, Grok CLI). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
+3. Initialises SQLite databases (`stats.db` + `sessions.db`) under the data directory (default `~/.context-cooler`, override with `--data-dir`). The directory is auto-created — no need for OpenClaw to be installed.
 4. **Records the install timestamp** in `~/.context-cooler/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
 
 **Optional — only when the OpenClaw workspace is detected** (skipped automatically on machines without OpenClaw):
@@ -144,12 +137,13 @@ Each adapter writes a single MCP-server entry (`stdio`, command `node`, args `[a
 | **Gemini CLI** | `~/.gemini/settings.json` (`mcpServers` map) | `src/adapters/gemini.ts` |
 | **OpenCode** | `~/.config/opencode/opencode.json` (`mcp` map) | `src/adapters/opencode.ts` |
 | **Pretzel Porter** | `~/.pretzel-porter/agent.config.local.json` (`mcpServers` map) | `src/adapters/pretzel-porter.ts` |
+| **Grok CLI** | `~/.grok/config.toml` (`[mcp_servers]` table) | `src/adapters/grok.ts` |
 
 Each adapter is under 80 lines and only depends on Node stdlib. They are also reachable from the command line for scripted installs:
 
 ```bash
 node dist/adapters/index.js list
-# {"adapters":["claude-code","cursor","codex","gemini","opencode","pretzel-porter"]}
+# {"adapters":["claude-code","cursor","codex","gemini","opencode","pretzel-porter","grok"]}
 
 node dist/adapters/index.js install \
   --server="$(pwd)/dist/server.js" \
@@ -169,7 +163,7 @@ Context Saver is a single MCP server that any MCP-compatible agent auto-discover
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │              ANY MCP-Compatible AI Agent                         │
-│   Claude Code / Cursor / Codex / Gemini CLI / OpenCode / Custom  │
+│   Claude Code / Cursor / Codex / Gemini CLI / OpenCode / Pretzel Porter / Grok CLI / Custom  │
 └───────────────────────────┬──────────────────────────────────────┘
                             │
                     MCP Protocol (stdio)
@@ -188,7 +182,7 @@ Context Saver is a single MCP server that any MCP-compatible agent auto-discover
 │   • ctx_stats        (aggregation)                               │
 │   • ctx_deliver      (4 backends)  Adapters (v4.6):              │
 │   • ctx_doctor       (health check) • claude-code / cursor /     │
-│                                       codex / gemini / opencode  │
+│                                       codex / gemini / opencode / pretzel-porter / grok  │
 │   Databases:                                                     │
 │   • stats.db    (runs + fts_index)                               │
 │   • sessions.db (events + snapshots)                             │
@@ -221,7 +215,17 @@ After install, every selected platform's config file ends up with an entry like 
 }
 ```
 
-Any MCP client (Claude Code, Cursor, Codex CLI, Gemini CLI, OpenCode) auto-discovers the 10 tools and calls them natively.
+For Grok CLI the native entry (written by the new `grok` adapter) looks like:
+
+```toml
+[mcp_servers.context-cooler]
+command = "node"
+args = ["/path/to/context-cooler/dist/server.js"]
+env = {}
+enabled = true
+```
+
+Any MCP client (Claude Code, Cursor, Codex CLI, Gemini CLI, OpenCode, Pretzel Porter, Grok CLI) auto-discovers the 10 tools and calls them natively.
 
 ---
 
@@ -442,7 +446,7 @@ All code is audited and hardened:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENCLAW_HOME` | `~/.openclaw` | Root directory for OpenClaw |
+| `OPENCLAW_HOME` | `~/.context-cooler` (or `~/.openclaw` for back-compat) | Root data directory (dbs, .env, optional workspace patches) |
 | `CTX_SNAPSHOT_BUDGET` | `2048` | Max bytes for session snapshots (256-65536) |
 | `CTX_FTS_ENABLED` | `1` | Set to `0` to disable FTS5 indexing |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for ctx_deliver |
@@ -477,14 +481,16 @@ context-cooler/
 │   │   ├── chunker.ts      # Markdown/JSON/text chunking
 │   │   ├── redact.ts       # Secret redaction patterns
 │   │   └── env.ts          # Environment and config loader
-│   └── adapters/           # v4.6 — platform installers (≤80 lines each)
+│   └── adapters/           # v5.2 — platform installers (≤80 lines each)
 │       ├── claude-code.ts
 │       ├── cursor.ts
 │       ├── codex.ts
 │       ├── gemini.ts
 │       ├── opencode.ts
+│       ├── pretzel-porter.ts # Pretzel Porter (self-hosted LLM)
+│       ├── grok.ts           # Grok CLI ~/.grok/config.toml (TOML)
 │       ├── types.ts
-│       ├── util.ts         # atomic write, JSON read, splice helpers
+│       ├── util.ts         # atomic write, JSON + TOML read/splice helpers
 │       └── index.ts        # CLI entry point + registry
 ├── install.py              # Cross-platform installer (interactive in v4.6)
 ├── package.json            # Node.js dependencies
