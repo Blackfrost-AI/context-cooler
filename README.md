@@ -55,7 +55,7 @@ The 195× reduction isn't theoretical — it's what a real morning-brief pipelin
 
 **First-time install:**
 ```bash
-git clone https://github.com/tlancas25/context-cooler.git
+git clone https://github.com/Blackfrost-AI/context-cooler.git
 cd context-cooler
 python3 install.py
 ```
@@ -70,7 +70,7 @@ python3 install.py --update
 
 **First-time install:**
 ```powershell
-git clone https://github.com/tlancas25/context-cooler.git
+git clone https://github.com/Blackfrost-AI/context-cooler.git
 cd context-cooler
 python install.py
 ```

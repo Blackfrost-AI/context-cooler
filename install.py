@@ -86,7 +86,7 @@ BY PROCEEDING YOU ACKNOWLEDGE:
   4. iMessage delivery (macOS only) uses AppleScript to send messages.
      Telegram/Slack/Discord delivery requires your own API tokens.
 
-Source: https://github.com/tlancas25/context-cooler
+Source: https://github.com/Blackfrost-AI/context-cooler
 License: MIT
 ================================================================================
 """
@@ -123,7 +123,7 @@ def update_from_git() -> bool:
     git_dir = SCRIPT_DIR / ".git"
     if not git_dir.exists():
         print("  This is not a git repository — cannot auto-update.")
-        print("  Re-clone from: https://github.com/tlancas25/context-cooler.git\n")
+        print("  Re-clone from: https://github.com/Blackfrost-AI/context-cooler.git\n")
         return False
 
     print("  Checking for updates...\n")

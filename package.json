@@ -24,7 +24,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tlancas25/context-cooler.git"
+    "url": "git+https://github.com/Blackfrost-AI/context-cooler.git"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -39,7 +39,7 @@
     "typescript": "^5.5.0"
   },
   "bugs": {
-    "url": "https://github.com/tlancas25/context-cooler/issues"
+    "url": "https://github.com/Blackfrost-AI/context-cooler/issues"
   },
-  "homepage": "https://github.com/tlancas25/context-cooler#readme"
+  "homepage": "https://github.com/Blackfrost-AI/context-cooler#readme"
 }
