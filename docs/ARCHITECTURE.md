@@ -2,7 +2,7 @@
 
 ## Overview
 
-Context Saver is a three-layer token optimization system for OpenClaw. It sits between the Claude context window and skill subprocesses, ensuring that only compact, relevant data enters the conversation.
+Context Cooler is a three-layer token optimization system. It sits between the AI agent's context window and skill subprocesses, ensuring that only compact, relevant data enters the conversation.
 
 ## Three-Layer Approach
 
@@ -38,9 +38,9 @@ The sandbox runner (`ctx_run.py`) executes skill commands in subprocesses. The f
 **How it works:**
 
 1. `ctx_run.py` receives `--skill` and `--cmd` arguments
-2. Locates the skill's main script in `$OPENCLAW_HOME/workspace/skills/<name>/scripts/`
+2. Locates the skill's main script in `$CONTEXT_COOLER_HOME/workspace/skills/<name>/scripts/`
 3. Spawns a subprocess with `subprocess.run()` (30-second timeout)
-4. Environment variables loaded from `$OPENCLAW_HOME/.env`
+4. Environment variables loaded from `$CONTEXT_COOLER_HOME/.env`
 5. Captures stdout/stderr completely
 6. Passes output to Layer 2 (filtering)
 7. Passes full output to FTS5 index (Layer 3)

@@ -125,7 +125,7 @@ Total: ~2 KB. Claude immediately knows what actions were taken, what alerts fire
 
 **Methodology:**
 
-A typical OpenClaw day involves:
+A typical agent day involves:
 - 5 status check pipelines (different service views)
 - 20 individual skill queries (dashboards, lists, searches)
 - 10 analytics calls

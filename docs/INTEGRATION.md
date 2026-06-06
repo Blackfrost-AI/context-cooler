@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide explains how to integrate Context Saver with existing OpenClaw skills, pipelines, and session management.
+This guide explains how to integrate Context Saver with your existing skills, pipelines, and session management.
 
 ## Adding --summary Flags to Skill Scripts
 
@@ -52,7 +52,7 @@ Instead of calling skill scripts directly, wrap them with `ctx_run.py`:
 ### Direct call (full output enters context)
 
 ```bash
-python3 ~/.openclaw/workspace/skills/my-api/scripts/my_cli.py dashboard
+python3 ~/context/workspace/skills/my-api/scripts/my_cli.py dashboard
 # Returns: 3 KB JSON (all 40+ fields)
 ```
 
@@ -76,7 +76,7 @@ Update your skill's SKILL.md to recommend Context Saver for data-heavy operation
 python3 scripts/my_cli.py dashboard
 
 # Token-saving (recommended for routine checks)
-python3 ~/.openclaw/workspace/skills/context-saver/scripts/ctx_run.py \
+python3 ~/context/workspace/skills/context-saver/scripts/ctx_run.py \
   --skill my-api --cmd "dashboard" --intent "check status"
 \`\`\`
 ```
@@ -118,7 +118,7 @@ import json
 def log_event(event_type, priority, data):
     """Log an event to the context-saver session tracker."""
     ctx_session = os.path.expanduser(
-        "~/.openclaw/workspace/skills/context-saver/scripts/ctx_session.py"
+        "~/context/workspace/skills/context-saver/scripts/ctx_session.py"
     )
     subprocess.run([
         "python3", ctx_session, "log",
@@ -140,7 +140,7 @@ def execute_action(operation, target):
 
 ## Configuring HEARTBEAT.md for Snapshot Triggers
 
-OpenClaw's HEARTBEAT.md system can trigger context snapshots before compaction.
+A HEARTBEAT.md system can trigger context snapshots before compaction.
 
 ### Add to HEARTBEAT.md
 
@@ -149,20 +149,20 @@ OpenClaw's HEARTBEAT.md system can trigger context snapshots before compaction.
 
 Before conversation compaction, run:
 \`\`\`bash
-python3 ~/.openclaw/workspace/skills/context-saver/scripts/ctx_session.py snapshot
+python3 ~/context/workspace/skills/context-saver/scripts/ctx_session.py snapshot
 \`\`\`
 
 ## Post-Compaction Hook
 
 After conversation resumes, run:
 \`\`\`bash
-python3 ~/.openclaw/workspace/skills/context-saver/scripts/ctx_session.py restore
+python3 ~/context/workspace/skills/context-saver/scripts/ctx_session.py restore
 \`\`\`
 ```
 
 ### Automatic Snapshot Trigger
 
-If your OpenClaw instance monitors context window usage, trigger snapshots when usage exceeds a threshold:
+If your agent monitors context window usage, trigger snapshots when usage exceeds a threshold:
 
 ```python
 # In your context monitor
@@ -170,7 +170,7 @@ if context_usage_pct > 80:
     subprocess.run([
         "python3",
         os.path.expanduser(
-            "~/.openclaw/workspace/skills/context-saver/scripts/ctx_session.py"
+            "~/context/workspace/skills/context-saver/scripts/ctx_session.py"
         ),
         "snapshot",
     ])
@@ -253,14 +253,14 @@ Use Context Saver for data-heavy steps and direct execution for lightweight ones
 ### Required Setup
 
 ```bash
-# Ensure OPENCLAW_HOME is set (defaults to ~/.openclaw)
-export OPENCLAW_HOME=~/.openclaw
+# Ensure CONTEXT_COOLER_HOME is set (defaults to your home directory)
+export CONTEXT_COOLER_HOME=~
 
 # Create the context directory
-mkdir -p $OPENCLAW_HOME/context
+mkdir -p $CONTEXT_COOLER_HOME/context
 
 # Verify the skill is accessible
-python3 $OPENCLAW_HOME/workspace/skills/context-saver/scripts/ctx_stats.py
+python3 $CONTEXT_COOLER_HOME/workspace/skills/context-saver/scripts/ctx_stats.py
 ```
 
 ### Custom Snapshot Budget
@@ -286,7 +286,7 @@ export CTX_FTS_ENABLED=0
 
 ### "Skill not found" Error
 
-Ensure the skill directory exists at `$OPENCLAW_HOME/workspace/skills/<name>/` and contains a `scripts/` subdirectory with at least one `.py` file.
+Ensure the skill directory exists at `$CONTEXT_COOLER_HOME/workspace/skills/<name>/` and contains a `scripts/` subdirectory with at least one `.py` file.
 
 ### Empty Summaries
 
@@ -306,8 +306,8 @@ DELETE FROM fts_index WHERE timestamp < datetime('now', '-7 days');
 
 ### Session ID Issues
 
-Session IDs are stored in `$OPENCLAW_HOME/context/.session_id`. To start a fresh session:
+Session IDs are stored in `$CONTEXT_COOLER_HOME/context/.session_id`. To start a fresh session:
 
 ```bash
-rm $OPENCLAW_HOME/context/.session_id
+rm $CONTEXT_COOLER_HOME/context/.session_id
 ```

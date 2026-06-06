@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sandboxed skill execution with intent filtering and FTS5 indexing.
 
-Runs an OpenClaw skill command in a subprocess, captures the full output,
+Runs a skill command in a subprocess, captures the full output,
 applies intent-driven filtering or field selection, indexes the result in
 SQLite FTS5, and returns a compact summary to stdout.
 
@@ -18,10 +18,10 @@ import sys
 import time
 from pathlib import Path
 
-OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
-SKILLS_DIR = os.path.join(OPENCLAW_HOME, "workspace/skills")
-ENV_FILE = os.path.join(OPENCLAW_HOME, ".env")
-DB_PATH = os.path.join(OPENCLAW_HOME, "context/stats.db")
+DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
+SKILLS_DIR = os.path.join(DATA_DIR, "workspace/skills")
+ENV_FILE = os.path.join(DATA_DIR, ".env")
+DB_PATH = os.path.join(DATA_DIR, "context/stats.db")
 
 
 def ensure_db():
@@ -348,7 +348,7 @@ def record_stats(conn, skill, command, intent, raw_bytes, summary_bytes, timesta
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run an OpenClaw skill command in a sandbox with automatic summarization.",
+        description="Run a skill command in a sandbox with automatic summarization.",
         epilog="Example: ctx_run.py --skill my-api --cmd 'dashboard' --intent 'check error rate'",
     )
     parser.add_argument("--skill", required=True, help="Name of the skill to execute")

@@ -13,8 +13,8 @@ import sqlite3
 import sys
 import time
 
-OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
-DB_PATH = os.path.join(OPENCLAW_HOME, "context/sessions.db")
+DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
+DB_PATH = os.path.join(DATA_DIR, "context/sessions.db")
 SNAPSHOT_BUDGET = max(256, min(int(os.environ.get("CTX_SNAPSHOT_BUDGET", "2048")), 65536))
 
 # Priority levels with budget allocation percentages
@@ -63,7 +63,7 @@ def ensure_db():
 
 def get_session_id():
     """Generate or retrieve the current session ID."""
-    session_file = os.path.join(OPENCLAW_HOME, "context/.session_id")
+    session_file = os.path.join(DATA_DIR, "context/.session_id")
     if os.path.exists(session_file):
         with open(session_file, "r") as f:
             return f.read().strip()

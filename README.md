@@ -23,7 +23,7 @@ When an agent needs to analyse a directory, a JSON dump, or 47 source files, the
 | `Read` × 47 (`/src/**/*.ts`) | ~700 KB raw text in context | ~175,000 |
 | `ctx_execute` (one shell+grep call, prints summary) | ~3.6 KB summary | ~900 |
 
-The 195× reduction isn't theoretical — it's what the existing OpenClaw morning-brief pipeline measures every day. The agent's job is to **write a script**, not to memorise the repo.
+The 195× reduction isn't theoretical — it's what a real morning-brief pipeline measures every day. The agent's job is to **write a script**, not to memorise the repo.
 
 `ctx_execute` runs that script in a sandboxed subprocess (11 supported runtimes), captures stdout, optionally filters with an `intent` keyword, indexes the full output in FTS5 (so the agent can search it later without re-reading), and returns only the compact summary to the context window.
 
@@ -36,8 +36,8 @@ The 195× reduction isn't theoretical — it's what the existing OpenClaw mornin
 
 ## What's new in v5.1
 
-- **Installs on any machine — OpenClaw no longer required.** `install.py` previously aborted with `OpenClaw home not found` if no data dir existed. The installer now defaults to `~/.context-cooler` (neutral, great for Grok CLI / Cursor / Claude Code standalone users), auto-creates it, runs only the universal steps (build + register MCP + dbs + timestamp), and skips OpenClaw-specific patches unless an OpenClaw workspace is detected. Back-compat: $OPENCLAW_HOME or --data-dir still works for existing OpenClaw users.
-- **`--data-dir` flag** added as a clearer alias for `--openclaw-home` (the old flag still works for back-compat).
+- **Installs on any machine.** The installer defaults to your home directory (great for Grok CLI / Cursor / Claude Code standalone users), auto-creates the data dir, and runs only the universal steps (build + register MCP + dbs + timestamp). Override with `$CONTEXT_COOLER_HOME` or `--data-dir`.
+- **`--data-dir` flag** sets where the SQLite databases live.
 
 ## What's new in v4.6
 
@@ -92,30 +92,20 @@ python3 install.py --platform=all               # Register every supported agent
 python3 install.py --non-interactive            # Use defaults, no prompts (for CI)
 python3 install.py --dry-run                    # Preview changes without writing
 python3 install.py --verify                     # Check installation status
-python3 install.py --uninstall                  # Remove context-saver wiring
+python3 install.py --uninstall                  # Show uninstall notes
 python3 install.py --update                     # git pull + rebuild + re-register
 python3 install.py --accept-disclaimer          # Skip disclaimer prompt (CI/scripts)
-python3 install.py --skip-cron                  # Don't patch cron jobs
-python3 install.py --skip-agents                # Don't patch AGENTS.md
-python3 install.py --skip-tools                 # Don't patch TOOLS.md
-python3 install.py --data-dir /custom/path      # Custom data directory (alias: --openclaw-home)
+python3 install.py --data-dir /custom/path      # Custom data directory
 ```
 
 ### What the Installer Does
 
-**Always (every machine):**
+Every install runs these four universal steps:
 
 1. Builds the MCP server (`npm install` + `npx tsc`).
 2. **Registers `context-cooler` with each selected platform adapter** (Claude Code, Cursor, Codex, Gemini, OpenCode, Pretzel Porter, Grok CLI). Each adapter writes atomically (tmp file + rename) to that platform's MCP config file.
-3. Initialises SQLite databases (`stats.db` + `sessions.db`) under the data directory (default `~/.context-cooler`, override with `--data-dir`). The directory is auto-created — no need for OpenClaw to be installed.
-4. **Records the install timestamp** in `~/.context-cooler/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
-
-**Optional — only when the OpenClaw workspace is detected** (skipped automatically on machines without OpenClaw):
-
-5. Copies the legacy python helpers into `~/.openclaw/workspace/skills/context-saver/`.
-6. Patches `AGENTS.md` with mandatory Context Saver Protocol rules.
-7. Patches `TOOLS.md` with quick-reference commands.
-8. Patches cron jobs to route data-heavy skill calls through context-saver.
+3. Initialises SQLite databases (`stats.db` + `sessions.db`) under the data directory (default: your home directory, override with `$CONTEXT_COOLER_HOME` or `--data-dir`). The directory is auto-created.
+4. **Records the install timestamp** in `<data-dir>/context/last-upgrade.txt` so `ctx_doctor` can remind you to upgrade later.
 
 ### Requirements
 
@@ -333,7 +323,7 @@ Send messages via iMessage (macOS), Telegram, Slack, or Discord. Auto-detects av
 
 ### ctx_doctor — Health Check
 
-Checks `OPENCLAW_HOME`, databases, FTS5 tables, skills directory, 5 language runtimes, mcporter availability, all 4 delivery backends, **and (v4.6) the local upgrade reminder**. Returns a pass/warn/fail report.
+Checks the data directory, databases, FTS5 tables, skills directory, 5 language runtimes, mcporter availability, all 4 delivery backends, **and (v4.6) the local upgrade reminder**. Returns a pass/warn/fail report.
 
 The upgrade reminder reads `~/.context-cooler/last-upgrade.txt` (an ISO 8601 timestamp written by `install.py`), compares it to today, and surfaces a `warn` if it's older than 30 days. **No network call** — this is purely a local file comparison.
 
@@ -390,7 +380,7 @@ launchd → python3 pipeline.py → ctx_execute → ctx_deliver → iMessage/Tel
 
 ## Savings benchmark
 
-Measured on a live OpenClaw instance running 8 positions, 20-symbol movers, daily briefs:
+Measured on a live agent instance running 8 positions, 20-symbol movers, daily briefs:
 
 | Call | Raw Output | After Filtering | Savings |
 |------|-----------|----------------|---------|
@@ -446,7 +436,7 @@ All code is audited and hardened:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENCLAW_HOME` | `~/.context-cooler` (or `~/.openclaw` for back-compat) | Root data directory (dbs, .env, optional workspace patches) |
+| `CONTEXT_COOLER_HOME` | your home directory | Root data directory (dbs live under `<dir>/context/`, optional `.env`) |
 | `CTX_SNAPSHOT_BUDGET` | `2048` | Max bytes for session snapshots (256-65536) |
 | `CTX_FTS_ENABLED` | `1` | Set to `0` to disable FTS5 indexing |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for ctx_deliver |

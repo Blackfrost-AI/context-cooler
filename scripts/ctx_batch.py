@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch execution of multiple OpenClaw skill commands in a single call.
+"""Batch execution of multiple Context Cooler skill commands in a single call.
 
 Runs multiple skill commands sequentially (or in parallel where possible),
 applies intent filtering to each, and returns a combined compact summary.
@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
+DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
 CTX_RUN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ctx_run.py")
 
 
@@ -64,7 +64,7 @@ def run_single(spec, env):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Execute multiple OpenClaw skill commands in a single batch call.",
+        description="Execute multiple Context Cooler skill commands in a single batch call.",
         epilog=(
             "Example: ctx_batch.py --commands '[{\"skill\": \"my-api\", "
             "\"cmd\": \"dashboard\", \"fields\": [\"active_users\",\"error_rate\"]}]'"
@@ -85,7 +85,7 @@ def main():
     env = os.environ.copy()
 
     # Load .env
-    env_file = os.path.join(OPENCLAW_HOME, ".env")
+    env_file = os.path.join(DATA_DIR, ".env")
     if os.path.exists(env_file):
         with open(env_file, "r") as f:
             for line in f:
@@ -96,9 +96,9 @@ def main():
 
     # Parse commands
     if args.pipeline:
-        # SECURITY: Restrict pipeline files to within the OpenClaw workspace
+        # SECURITY: Restrict pipeline files to within the agent workspace
         pipeline_path = os.path.realpath(args.pipeline)
-        allowed_dir = os.path.realpath(os.path.join(OPENCLAW_HOME, "workspace"))
+        allowed_dir = os.path.realpath(os.path.join(DATA_DIR, "workspace"))
         if not pipeline_path.startswith(allowed_dir + os.sep) and pipeline_path != allowed_dir:
             print(json.dumps({"success": False, "error": "Pipeline file must be within the workspace directory"}))
             sys.exit(1)

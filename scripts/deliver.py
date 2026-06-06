@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified message delivery for context-saver pipelines.
+"""Unified message delivery for Context Cooler pipelines.
 
 Supports multiple backends: iMessage, Telegram, Slack, Discord, webhook.
 Each backend is auto-detected based on available CLI tools and env vars.
@@ -36,8 +36,8 @@ import sys
 import urllib.request
 import urllib.error
 
-OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
-ENV_FILE = os.path.join(OPENCLAW_HOME, ".env")
+DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
+ENV_FILE = os.path.join(DATA_DIR, ".env")
 
 
 def load_env():
@@ -211,7 +211,7 @@ def deliver(backend, to, text, env):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Unified message delivery for context-saver pipelines",
+        description="Unified message delivery for Context Cooler pipelines",
         epilog="Backends: imessage, telegram, slack, discord",
     )
     parser.add_argument("--backend", "-b", default="auto",

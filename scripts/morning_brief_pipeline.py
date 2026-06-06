@@ -2,7 +2,7 @@
 """Morning brief pipeline — gathers data, formats, and delivers via iMessage.
 
 NO AGENT NEEDED. This script does everything:
-1. Gathers trading data through ctx_run.py (context-saver)
+1. Gathers trading data through ctx_run.py (Context Cooler)
 2. Formats into a clean brief
 3. Sends directly via `imsg send`
 
@@ -21,9 +21,9 @@ import sys
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
-CTX_RUN = os.path.join(OPENCLAW_HOME, "workspace/skills/context-saver/scripts/ctx_run.py")
-ENV_FILE = os.path.join(OPENCLAW_HOME, ".env")
+DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
+CTX_RUN = os.path.join(SCRIPT_DIR, "ctx_run.py")
+ENV_FILE = os.path.join(DATA_DIR, ".env")
 DELIVER = os.path.join(SCRIPT_DIR, "deliver.py")
 
 
@@ -200,7 +200,7 @@ def main():
     if not args.to and not args.print_only and not args.json:
         parser.error("--to <phone> required (or use --print-only)")
 
-    # Gather data through context-saver
+    # Gather data through Context Cooler
     account = run_ctx("alpaca-trader", "account", fields="equity,buying_power,cash,day_pnl,portfolio_value")
     positions = run_ctx("alpaca-trader", "positions", intent="summary" if not args.detailed else "summary 20")
     movers = run_ctx("alpaca-trader", "movers", intent="top 5")
@@ -235,7 +235,7 @@ def main():
             print(f"❌ Failed to send to {recipient}: {msg}", file=sys.stderr)
 
     # Log delivery
-    log_file = os.path.join(OPENCLAW_HOME, "workspace/memory/morning-brief-deliveries.log")
+    log_file = os.path.join(DATA_DIR, "workspace/memory/morning-brief-deliveries.log")
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
     with open(log_file, "a") as f:
         ts = time.strftime("%Y-%m-%d %H:%M:%S")

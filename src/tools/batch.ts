@@ -18,7 +18,7 @@ export const batchSchema = z.object({
           .describe("Runtime language"),
         code: z.string().optional().describe("Code to execute"),
         command: z.string().optional().describe("Shell command to execute"),
-        skill: z.string().optional().describe("OpenClaw skill name"),
+        skill: z.string().optional().describe("Skill name"),
         cmd: z.string().optional().describe("Command for the skill"),
         intent: z.string().optional().describe("Intent filter"),
         fields: z.string().optional().describe("Comma-separated fields"),

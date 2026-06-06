@@ -1,17 +1,17 @@
 import { z } from "zod";
 import { execSync } from "child_process";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
-import { getOpenClawHome, getContextDir, isFtsEnabled } from "../lib/env";
+import { getDataDir, getContextDir, isFtsEnabled } from "../lib/env";
 import { getStatsDb, getSessionsDb } from "../lib/db";
 
 // v4.6: where install.py records the timestamp of the most recent install
 // or `--update`. We read this LOCAL file (no network) and surface a
-// reminder if it's older than 30 days.
+// reminder if it's older than 30 days. Lives under <data dir>/context/ so
+// install.py and doctor.ts agree on one location.
 const LAST_UPGRADE_PATH = path.join(
-  os.homedir(),
-  ".context-cooler",
+  getDataDir(),
+  "context",
   "last-upgrade.txt"
 );
 const UPGRADE_REMINDER_DAYS = 30;
@@ -43,8 +43,8 @@ function checkRuntime(name: string, cmd: string): Check {
 export async function handleDoctor(_args: DoctorInput) {
   const checks: Check[] = [];
 
-  // Check OPENCLAW_HOME
-  const home = getOpenClawHome();
+  // Check data directory
+  const home = getDataDir();
   if (fs.existsSync(home)) {
     checks.push({
       name: "Data directory",
@@ -184,7 +184,7 @@ export async function handleDoctor(_args: DoctorInput) {
     checks.push({
       name: "mcporter",
       status: "warn",
-      detail: "not installed (optional — for OpenClaw bridge)",
+      detail: "not installed (optional — for MCP bridge)",
     });
   }
 

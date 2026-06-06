@@ -36,7 +36,7 @@ export const executeSchema = z.object({
   skill: z
     .string()
     .optional()
-    .describe("OpenClaw skill name — if provided, executes the skill's CLI script with --verbose injection"),
+    .describe("Skill name — if provided, executes the skill's CLI script with --verbose injection"),
   cmd: z
     .string()
     .optional()

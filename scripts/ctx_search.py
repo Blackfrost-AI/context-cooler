@@ -12,8 +12,8 @@ import os
 import sqlite3
 import sys
 
-OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
-DB_PATH = os.path.join(OPENCLAW_HOME, "context/stats.db")
+DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
+DB_PATH = os.path.join(DATA_DIR, "context/stats.db")
 
 
 def search(query, source=None, limit=10):

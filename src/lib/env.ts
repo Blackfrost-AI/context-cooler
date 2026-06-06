@@ -2,18 +2,17 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 
-let _openclawHome: string | null = null;
+let _dataDir: string | null = null;
 let _envLoaded = false;
 
-export function getOpenClawHome(): string {
-  if (_openclawHome) return _openclawHome;
-  _openclawHome =
-    process.env.OPENCLAW_HOME || path.join(os.homedir(), ".context-cooler");
-  return _openclawHome;
+export function getDataDir(): string {
+  if (_dataDir) return _dataDir;
+  _dataDir = process.env.CONTEXT_COOLER_HOME || os.homedir();
+  return _dataDir;
 }
 
 export function getContextDir(): string {
-  const dir = path.join(getOpenClawHome(), "context");
+  const dir = path.join(getDataDir(), "context");
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -21,13 +20,13 @@ export function getContextDir(): string {
 }
 
 export function getSkillsDir(): string {
-  return path.join(getOpenClawHome(), "workspace", "skills");
+  return path.join(getDataDir(), "workspace", "skills");
 }
 
 export function loadEnv(): Record<string, string> {
   if (_envLoaded) return process.env as Record<string, string>;
 
-  const envPath = path.join(getOpenClawHome(), ".env");
+  const envPath = path.join(getDataDir(), ".env");
   if (fs.existsSync(envPath)) {
     const lines = fs.readFileSync(envPath, "utf-8").split("\n");
     for (const line of lines) {

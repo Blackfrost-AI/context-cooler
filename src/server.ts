@@ -33,7 +33,7 @@ const TOOLS = [
   {
     name: "ctx_execute",
     description:
-      "Execute code in a sandboxed subprocess. Only stdout enters context. Supports 11 languages. Use 'skill' + 'cmd' to execute OpenClaw skills with automatic --verbose injection. Returns a structured result: status (success | runtime_error | timeout | sandbox_violation | language_unavailable), exit_code, duration_ms, plus the filtered stdout summary.",
+      "Execute code in a sandboxed subprocess. Only stdout enters context. Supports 11 languages. Use 'skill' + 'cmd' to execute skills with automatic --verbose injection. Returns a structured result: status (success | runtime_error | timeout | sandbox_violation | language_unavailable), exit_code, duration_ms, plus the filtered stdout summary.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -46,7 +46,7 @@ const TOOLS = [
         timeout: { type: "number", default: 30000, description: "Max execution time in ms" },
         intent: { type: "string", description: "What you're looking for — filters large output and indexes for later search" },
         fields: { type: "string", description: "Comma-separated fields to extract from JSON output" },
-        skill: { type: "string", description: "OpenClaw skill name (executes skill CLI with --verbose injection)" },
+        skill: { type: "string", description: "Skill name (executes skill CLI with --verbose injection)" },
         cmd: { type: "string", description: "Command to pass to the skill script" },
       },
       required: ["language", "code"],

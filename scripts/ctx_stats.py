@@ -10,9 +10,9 @@ import os
 import sqlite3
 import sys
 
-OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME", os.path.expanduser("~/.openclaw"))
-STATS_DB = os.path.join(OPENCLAW_HOME, "context/stats.db")
-SESSIONS_DB = os.path.join(OPENCLAW_HOME, "context/sessions.db")
+DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
+STATS_DB = os.path.join(DATA_DIR, "context/stats.db")
+SESSIONS_DB = os.path.join(DATA_DIR, "context/sessions.db")
 
 
 def get_run_stats():
