@@ -42,9 +42,21 @@ def ensure_db():
     """)
     conn.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
-            skill, command, content, timestamp
+            source, label, content, timestamp, tokenize='porter'
         )
     """)
+    # Migrate a pre-unification skill/command fts_index to the canonical
+    # source/label schema (matches src/lib/db.ts) so the TS + Python writers
+    # share one table instead of dropping each other's data.
+    try:
+        conn.execute("SELECT source FROM fts_index LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute("DROP TABLE fts_index")
+        conn.execute("""
+            CREATE VIRTUAL TABLE fts_index USING fts5(
+                source, label, content, timestamp, tokenize='porter'
+            )
+        """)
     conn.commit()
     return conn
 
@@ -321,7 +333,7 @@ def index_output(conn, skill, command, content, timestamp):
         if len(safe_content) > MAX_INDEX_CONTENT:
             safe_content = safe_content[:MAX_INDEX_CONTENT] + "\n[TRUNCATED]"
         conn.execute(
-            "INSERT INTO fts_index (skill, command, content, timestamp) VALUES (?, ?, ?, ?)",
+            "INSERT INTO fts_index (source, label, content, timestamp) VALUES (?, ?, ?, ?)",
             (skill, command, safe_content, timestamp),
         )
         # Prune old entries to prevent unbounded growth

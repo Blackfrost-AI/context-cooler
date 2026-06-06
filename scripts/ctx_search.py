@@ -35,21 +35,21 @@ def search(query, source=None, limit=10):
         if source:
             if source == "last-run":
                 rows = conn.execute(
-                    "SELECT skill, command, content, timestamp FROM fts_index "
+                    "SELECT source, label, content, timestamp FROM fts_index "
                     "WHERE fts_index MATCH ? "
                     "ORDER BY rank LIMIT ?",
                     (query, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT skill, command, content, timestamp FROM fts_index "
-                    "WHERE fts_index MATCH ? AND skill = ? "
+                    "SELECT source, label, content, timestamp FROM fts_index "
+                    "WHERE fts_index MATCH ? AND source = ? "
                     "ORDER BY rank LIMIT ?",
                     (query, source, limit),
                 ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT skill, command, content, timestamp FROM fts_index "
+                "SELECT source, label, content, timestamp FROM fts_index "
                 "WHERE fts_index MATCH ? "
                 "ORDER BY rank LIMIT ?",
                 (query, limit),
@@ -61,7 +61,7 @@ def search(query, source=None, limit=10):
         conn = sqlite3.connect(DB_PATH)
         try:
             rows = conn.execute(
-                "SELECT skill, command, content, timestamp FROM fts_index "
+                "SELECT source, label, content, timestamp FROM fts_index "
                 "WHERE fts_index MATCH ? "
                 "ORDER BY rank LIMIT ?",
                 (escaped_query, limit),
@@ -71,7 +71,7 @@ def search(query, source=None, limit=10):
             return {"success": False, "error": f"Search query error: {e2}"}
 
     results = []
-    for skill, command, content, timestamp in rows:
+    for source, label, content, timestamp in rows:
         # Try to parse content as JSON for cleaner output
         try:
             parsed = json.loads(content)
@@ -85,8 +85,8 @@ def search(query, source=None, limit=10):
             parsed = content_str
 
         results.append({
-            "skill": skill,
-            "command": command,
+            "source": source,
+            "label": label,
             "timestamp": timestamp,
             "content": parsed,
         })
