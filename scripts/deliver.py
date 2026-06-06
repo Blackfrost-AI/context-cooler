@@ -6,7 +6,7 @@ Each backend is auto-detected based on available CLI tools and env vars.
 
 Usage:
     # iMessage (default if imsg is available)
-    python3 deliver.py --to +15551234567 --text "Hello"
+    python3 deliver.py --to +12025550100 --text "Hello"
 
     # Telegram
     python3 deliver.py --backend telegram --to 5328771204 --text "Hello"
@@ -15,10 +15,10 @@ Usage:
     python3 deliver.py --backend slack --text "Hello"
 
     # Auto-detect: tries imsg first, then telegram, then slack
-    python3 deliver.py --to +15551234567 --text "Hello"
+    python3 deliver.py --to +12025550100 --text "Hello"
 
     # Pipe from stdin (for pipeline chaining)
-    echo "Hello" | python3 deliver.py --to +15551234567
+    echo "Hello" | python3 deliver.py --to +12025550100
 
 Environment variables:
     TELEGRAM_BOT_TOKEN   — Telegram bot token for telegram backend

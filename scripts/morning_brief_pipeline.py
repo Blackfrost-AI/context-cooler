@@ -7,9 +7,9 @@ NO AGENT NEEDED. This script does everything:
 3. Sends directly via `imsg send`
 
 Usage:
-    python3 morning_brief_pipeline.py --to +15551234567
-    python3 morning_brief_pipeline.py --to +15551234567 --detailed
-    python3 morning_brief_pipeline.py --to +15551234567 --to +15551234567  # Multiple recipients
+    python3 morning_brief_pipeline.py --to +12025550100
+    python3 morning_brief_pipeline.py --to +12025550100 --detailed
+    python3 morning_brief_pipeline.py --to +12025550100 --to +12025550101  # Multiple recipients
     python3 morning_brief_pipeline.py --print-only   # Don't send, just print
 """
 
