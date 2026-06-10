@@ -66,7 +66,12 @@ export function isFtsEnabled(): boolean {
 // can add roots via CTX_FS_ALLOW (path-separator or comma delimited). Symlink
 // escapes are blocked by resolving realpath before the prefix check.
 export function allowedReadRoots(): string[] {
-  const roots = [getDataDir(), process.cwd()];
+  // Confine to the workspace subtree (mirrors the Python twin's
+  // <DATA_DIR>/workspace guard) + the current project dir — NOT the whole data
+  // dir, which defaults to os.homedir() and would otherwise leave ~/.ssh, ~/.aws
+  // readable in a default (no CONTEXT_COOLER_HOME) deployment. (Adversarial-review
+  // catch on CC-S4-005.)
+  const roots = [path.join(getDataDir(), "workspace"), process.cwd()];
   const extra = (process.env.CTX_FS_ALLOW || "")
     .split(/[;,]/)
     .map((s) => s.trim())

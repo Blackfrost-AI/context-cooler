@@ -17,11 +17,15 @@ export const executeSchema = z.object({
     .describe("Runtime language for sandboxed execution"),
   code: z
     .string()
+    .max(10_000_000) // CC-S3-009: cap code size (10MB) to bound parse/store/DoS
     .describe(
       "Source code to execute. Use console.log (JS/TS), print (Python/Ruby/Perl/R), echo (Shell/PHP), fmt.Println (Go), or IO.puts (Elixir) to output a summary to context."
     ),
   timeout: z
     .number()
+    .int()
+    .min(100)
+    .max(600_000) // CC-S3-009: bound timeout [100ms, 10min] (was unbounded: NaN/negative/overflow)
     .default(30000)
     .describe("Max execution time in ms"),
   intent: z

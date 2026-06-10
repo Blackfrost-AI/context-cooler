@@ -25,15 +25,20 @@ export const batchSchema = z.object({
       })
     )
     .min(1)
+    .max(100) // CC-S3-009: bound batch size (DoS)
     .describe("Commands to execute as a batch"),
   queries: z
-    .array(z.string())
+    .array(z.string().max(2000))
     .min(1)
+    .max(50) // CC-S3-009: bound query flood
     .describe(
       "Search queries to extract information from indexed output. Put ALL your questions here."
     ),
   timeout: z
     .number()
+    .int()
+    .min(100)
+    .max(600_000)
     .default(60000)
     .describe("Max execution time in ms (total for all commands)"),
 });

@@ -69,7 +69,7 @@ try {
 }
 
 export const fetchIndexSchema = z.object({
-  url: z.string().describe("The URL to fetch and index"),
+  url: z.string().url().max(2048).describe("The URL to fetch and index"), // CC-S3-009 + CC-SSRF-006: must be a URL, length-bounded
   source: z
     .string()
     .optional()

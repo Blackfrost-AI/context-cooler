@@ -29,8 +29,10 @@ test("S4: assertPathAllowed blocks paths outside allowed roots", () => {
   const outside = path.join(os.tmpdir(), "definitely-outside-" + Date.now(), "secret");
   assert.equal(env.assertPathAllowed(outside).ok, false);
 });
-test("S4: assertPathAllowed allows the data dir", () => {
-  const inside = path.join(HOME, "context", "x.txt");
+test("S4: assertPathAllowed allows the workspace subtree (legit use)", () => {
+  const inside = path.join(HOME, "workspace", "skills", "x", "data.txt");
+  fs.mkdirSync(path.dirname(inside), { recursive: true });
+  fs.writeFileSync(inside, "ok");
   assert.equal(env.assertPathAllowed(inside).ok, true);
 });
 
@@ -40,6 +42,29 @@ test("S3: executeSchema rejects type-confused / missing / bad-enum args", () => 
   assert.equal(execute.executeSchema.safeParse({ language: "shell" }).success, false);
   assert.equal(execute.executeSchema.safeParse({ language: "klingon", code: "x" }).success, false);
   assert.equal(execute.executeSchema.safeParse({ language: "shell", code: "echo ok" }).success, true);
+});
+test("S3: executeSchema enforces input bounds (timeout range, code size)", () => {
+  assert.equal(execute.executeSchema.safeParse({ language: "shell", code: "x", timeout: -1 }).success, false);
+  assert.equal(execute.executeSchema.safeParse({ language: "shell", code: "x", timeout: 10 ** 12 }).success, false);
+  assert.equal(execute.executeSchema.safeParse({ language: "shell", code: "x".repeat(10_000_001) }).success, false);
+  assert.equal(execute.executeSchema.safeParse({ language: "shell", code: "echo ok", timeout: 5000 }).success, true);
+});
+
+// ---- CC-S4-005: workspace confinement (NOT the whole home/data dir) ----
+test("S4: home-directory secrets are blocked even when data dir defaults to home", () => {
+  // simulate a default deploy: data dir = a fake home; a ~/.aws-style path under
+  // home but OUTSIDE <home>/workspace must be blocked.
+  const prev = process.env.CONTEXT_COOLER_HOME;
+  process.env.CONTEXT_COOLER_HOME = HOME;            // <- treated as the "home"/data dir
+  delete env.__dummy;                                 // no-op to keep linter calm
+  const homeSecret = path.join(HOME, ".aws", "credentials");
+  fs.mkdirSync(path.dirname(homeSecret), { recursive: true });
+  fs.writeFileSync(homeSecret, "secret");
+  // env caches getDataDir(); allowedReadRoots recomputes from process.env each call,
+  // and getDataDir() is cached to HOME from module load, so workspace = HOME/workspace.
+  const r = env.assertPathAllowed(homeSecret);
+  process.env.CONTEXT_COOLER_HOME = prev;
+  assert.equal(r.ok, false, "home-dir secret outside workspace must be blocked");
 });
 
 // ---- CC-S5-001: execution is opt-in ----

@@ -3,10 +3,15 @@ import { searchIndex } from "../lib/db";
 
 export const searchSchema = z.object({
   queries: z
-    .array(z.string())
+    .array(z.string().max(2000))
+    .min(1)
+    .max(50) // CC-S3-009: bound query flood
     .describe("Array of search queries. Batch ALL questions in one call."),
   limit: z
     .number()
+    .int()
+    .min(1)
+    .max(50) // CC-S3-009: bound result-set size
     .default(5)
     .describe("Results per query (default: 5)"),
   source: z

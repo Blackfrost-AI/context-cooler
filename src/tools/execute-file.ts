@@ -19,7 +19,7 @@ export const executeFileSchema = z.object({
     .describe(
       "Code to process FILE_CONTENT variable. Print summary via console.log/print/echo."
     ),
-  timeout: z.number().default(30000).describe("Max execution time in ms"),
+  timeout: z.number().int().min(100).max(600_000).default(30000).describe("Max execution time in ms"), // CC-S3-009: bounded
   intent: z
     .string()
     .optional()
