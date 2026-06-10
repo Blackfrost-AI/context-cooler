@@ -33,7 +33,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "5.2.0"
+VERSION = "5.3.0"
 
 # v4.6: Local timestamp consulted by ctx_doctor for the "you haven't
 # upgraded in 30+ days" reminder. We touch this on every install/upgrade.
@@ -116,7 +116,20 @@ def show_disclaimer(skip_prompt: bool = False) -> bool:
             print("  Please type 'yes' or 'no'.")
 
 
-def update_from_git() -> bool:
+def _confirm_remote_code(allow_remote_code: bool) -> bool:
+    """CC-S8-008: confirm running remote code via --update."""
+    if allow_remote_code:
+        return True
+    if not sys.stdin.isatty():
+        return False
+    try:
+        ans = input("  --update will git-pull + rebuild + RUN remote code. Continue? [yes/no]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return ans in ("yes", "y")
+
+
+def update_from_git(allow_remote_code: bool = False) -> bool:
     """Pull the latest version from the remote git repository."""
     import subprocess
 
@@ -152,6 +165,14 @@ def update_from_git() -> bool:
         print("  Already on the latest version.\n")
         # Still run the install to re-build and re-register
         return True
+
+    # CC-S8-008 fix: --update pulls AND rebuilds/runs whatever the remote HEAD
+    # contains. Gate the actual pull behind explicit consent so a scripted/CI
+    # --update cannot silently execute remote code.
+    if not _confirm_remote_code(allow_remote_code):
+        print("  Refused: --update runs remote code. Re-run with --allow-remote-code "
+              "(or confirm interactively) once you've reviewed the incoming commits above.")
+        return False
 
     # Pull changes
     print("  Pulling latest changes...")
@@ -241,47 +262,56 @@ def init_databases(data_dir: Path, dry_run: bool) -> bool:
 
     context_dir.mkdir(parents=True, exist_ok=True)
 
-    # Stats + FTS5 index
+    # CC-S9-011 fix: create the SAME tables the runtime (src/lib/db.ts + the
+    # Python twins) actually reads. The old installer created a THIRD divergent
+    # schema (ctx_stats / ctx_index[source,content] / ctx_events / ctx_snapshots)
+    # that no runtime ever touched — dead weight and an incompatible fts_index
+    # column set. One schema now.
     stats_db = context_dir / "stats.db"
     conn = sqlite3.connect(str(stats_db))
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS ctx_stats (
+        CREATE TABLE IF NOT EXISTS runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now')),
-            skill TEXT,
-            command TEXT,
-            raw_bytes INTEGER,
-            summary_bytes INTEGER,
-            bytes_saved INTEGER,
-            compression_pct REAL
+            timestamp TEXT NOT NULL,
+            skill TEXT NOT NULL,
+            command TEXT NOT NULL,
+            intent TEXT,
+            raw_bytes INTEGER NOT NULL,
+            summary_bytes INTEGER NOT NULL,
+            savings_pct REAL NOT NULL
         )
     """)
     conn.execute("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS ctx_index USING fts5(
-            source, content, tokenize='porter'
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
+            source, label, content, timestamp, tokenize='porter'
         )
     """)
     conn.commit()
     conn.close()
     log(f"Initialized {stats_db}", "OK")
 
-    # Session events
+    # Session events (matches getSessionsDb() in src/lib/db.ts)
     sessions_db = context_dir / "sessions.db"
     conn = sqlite3.connect(str(sessions_db))
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS ctx_events (
+        CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now')),
-            event_type TEXT,
-            priority TEXT DEFAULT 'medium',
-            data TEXT
+            timestamp TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            priority_level INTEGER NOT NULL,
+            data TEXT NOT NULL,
+            byte_size INTEGER NOT NULL
         )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS ctx_snapshots (
+        CREATE TABLE IF NOT EXISTS snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now')),
-            snapshot TEXT
+            timestamp TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            snapshot TEXT NOT NULL,
+            byte_size INTEGER NOT NULL
         )
     """)
     conn.commit()
@@ -648,6 +678,10 @@ def main():
     parser.add_argument("--uninstall", action="store_true", help="Show uninstall notes")
     parser.add_argument("--verify", action="store_true", help="Check installation status")
     parser.add_argument("--update", action="store_true", help="Pull latest from git and re-install")
+    parser.add_argument("--allow-remote-code", action="store_true",
+                        help="Required to confirm that --update will git-pull + rebuild + RUN remote code (CC-S8-008).")
+    parser.add_argument("--yes", action="store_true",
+                        help="Confirm bulk actions (e.g. --platform=all) non-interactively (CC-S8-008).")
     parser.add_argument("--accept-disclaimer", action="store_true", help="Accept disclaimer without prompt (for CI/scripted installs)")
     parser.add_argument(
         "--platform",
@@ -669,7 +703,7 @@ def main():
 
     # ── Update mode: git pull then continue to install ──
     if args.update:
-        if not update_from_git():
+        if not update_from_git(args.allow_remote_code):
             sys.exit(1)
         # Force rebuild after update (node_modules stays, but dist gets rebuilt)
         dist_dir = SCRIPT_DIR / "dist"
@@ -722,11 +756,24 @@ def main():
     # v4.6: resolve which AI agent platforms we're registering with.
     # CLI flags > interactive prompt > "all" default.
     if args.platform:
-        platforms = (
-            list(SUPPORTED_PLATFORMS)
-            if "all" in args.platform
-            else list(dict.fromkeys(args.platform))  # dedupe, preserve order
-        )
+        if "all" in args.platform:
+            # CC-S8-008 fix: bulk registration into all 7 agent configs is a
+            # deliberate action — require explicit confirmation (--yes or a TTY
+            # yes). The gate applies in --dry-run too, so the preview honestly
+            # reflects what a real run would do.
+            confirmed = args.yes
+            if not confirmed and sys.stdin.isatty():
+                try:
+                    confirmed = input(f"  Register the RCE server into ALL {len(SUPPORTED_PLATFORMS)} agent configs? [yes/no]: ").strip().lower() in ("yes", "y")
+                except (EOFError, KeyboardInterrupt):
+                    confirmed = False
+            if not confirmed:
+                log("--platform=all not confirmed; pass --yes to register all platforms. Registering none.", "WARN")
+                platforms = []
+            else:
+                platforms = list(SUPPORTED_PLATFORMS)
+        else:
+            platforms = list(dict.fromkeys(args.platform))  # dedupe, preserve order
     else:
         platforms = prompt_platforms(non_interactive)
 

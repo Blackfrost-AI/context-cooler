@@ -187,6 +187,26 @@ function extractScalars(obj: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
+// CC-E1 fix: the compact-by-default summary when NO intent/fields is given.
+// Previously the no-filter path re-stringified the ENTIRE (forced-verbose) blob
+// as `summary` + ~48 tokens of metadata — strictly worse than not using the tool
+// (net token-NEGATIVE in 2/3 of representative calls). The full output is still
+// indexed for ctx_search, so detail is never lost. Mirrors ctx_run.py's default
+// (top-level scalars, or first 5 keys / first 5 array items).
+export function compactDefault(data: unknown): unknown {
+  if (Array.isArray(data)) return data.slice(0, 5);
+  if (typeof data === "object" && data !== null) {
+    const obj = data as Record<string, unknown>;
+    const scalars = extractScalars(obj);
+    if (Object.keys(scalars).length > 0) return scalars;
+    // no scalar fields — return the first 5 keys so the shape is visible
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj).slice(0, 5)) out[k] = v;
+    return out;
+  }
+  return data;
+}
+
 export function filterByFields(
   data: unknown,
   fields: string[]

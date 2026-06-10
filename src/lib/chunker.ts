@@ -5,6 +5,10 @@
  */
 
 const MAX_CHUNK_SIZE = 4096;
+// CC-E2 fix: overlap consecutive oversize-split parts so a fact that lands on a
+// 4096-byte boundary appears WHOLE in at least one chunk (the blind split
+// previously lost boundary-spanning facts entirely — 0% recall on that subset).
+const CHUNK_OVERLAP = 256;
 
 export interface Chunk {
   label: string;
@@ -96,12 +100,14 @@ function splitLargeChunk(label: string, content: string): Chunk[] {
 
   const chunks: Chunk[] = [];
   let part = 1;
-  for (let i = 0; i < content.length; i += MAX_CHUNK_SIZE) {
+  const step = MAX_CHUNK_SIZE - CHUNK_OVERLAP;
+  for (let i = 0; i < content.length; i += step) {
     chunks.push({
       label: `${label} (part ${part})`,
       content: content.slice(i, i + MAX_CHUNK_SIZE),
     });
     part++;
+    if (i + MAX_CHUNK_SIZE >= content.length) break; // last chunk reached the end
   }
   return chunks;
 }

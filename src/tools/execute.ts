@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as path from "path";
 import { executeCode, executeArgv, splitArgs, findSkillScript, executeShellCommand } from "../lib/sandbox";
-import { filterByIntent, filterByFields } from "../lib/filter";
+import { filterByIntent, filterByFields, compactDefault } from "../lib/filter";
 import { redactSecrets } from "../lib/redact";
 import { recordRun, indexContent } from "../lib/db";
 import { loadEnv } from "../lib/env";
@@ -160,6 +160,9 @@ export async function handleExecute(args: ExecuteInput) {
     summary = filterByFields(parsed, fieldList);
   } else if (isJson && args.intent) {
     summary = filterByIntent(parsed, args.intent);
+  } else if (isJson) {
+    // CC-E1 fix: compact-by-default (was: echo the full verbose blob).
+    summary = compactDefault(parsed);
   }
 
   const summaryStr = isJson
@@ -169,17 +172,17 @@ export async function handleExecute(args: ExecuteInput) {
   const bytesSaved = Math.max(0, rawBytes - summaryBytes);
   const savingsPct = rawBytes > 0 ? (bytesSaved / rawBytes) * 100 : 0;
 
-  // Record stats
-  if (skillName) {
-    recordRun(
-      skillName,
-      commandStr || code.slice(0, 100),
-      args.intent || null,
-      rawBytes,
-      summaryBytes,
-      Math.round(savingsPct * 10) / 10
-    );
-  }
+  // Record stats. CC-S9-011 fix: record EVERY run, not only skill runs (the old
+  // `if (skillName)` gate made ctx_stats undercount the most common usage). For
+  // non-skill runs we label the source with the language.
+  recordRun(
+    skillName || `(${language})`,
+    commandStr || code.slice(0, 100),
+    args.intent || null,
+    rawBytes,
+    summaryBytes,
+    Math.round(savingsPct * 10) / 10
+  );
 
   // Index in FTS5 if output is substantial
   if (rawBytes > 100) {

@@ -389,7 +389,15 @@ Measured on a live agent instance running 8 positions, 20-symbol movers, daily b
 | `movers` (20 symbols) | 2,284 B | 367 B | **83.9%** |
 | **Pipeline total** | **5,380 B** | **1,284 B** | **76.1%** |
 
-Across all measured workloads, savings sit in the **70-98% range** — the upper end driven by analyses that would otherwise require pulling whole files (`Read` × N) versus a single `ctx_execute` that emits only the answer.
+> **Measured-in-real-tokens correction (2026 audit).** The percentages above are **byte ratios** measured
+> against the tool's own forced `--verbose` output and converted at an asserted "1.5 tokens/byte". A token audit
+> (counted with a real sub-word tokenizer) found the real rate is **~0.30 tokens/byte for JSON** — so the
+> byte-based headlines (and the "750K→200K tok/day", "195×") are roughly **5× overstated** when restated in
+> tokens. Counted honestly as `(compact_baseline − returned)/compact_baseline`, the win depends heavily on how
+> you call the tool: passing `fields` (or an `intent`) on a **large** output saves **~85–99% real tokens**;
+> calling it with **no filter on small outputs is roughly break-even-to-negative** because of a fixed
+> per-call metadata overhead. Rule of thumb: **use `fields`/`intent`, and reach for `ctx_execute` when the raw
+> output is large and you only need part of it** — not for small results you'd happily read directly.
 
 Zero-token morning brief pipeline: launchd triggers Python directly — **no LLM tokens consumed**.
 
@@ -415,20 +423,37 @@ WITH Context Saver v4.6:
 
 ## Security
 
-All code is audited and hardened:
+> **This tool executes code and registers itself into your AI agents' configs. Read this honestly.**
+> A 2026 security + performance audit (REDFORGE) found and fixed several serious issues; the items below
+> describe the **actual** behavior of the TypeScript MCP server (`src/`, `dist/`) after those fixes.
 
-- **Sandboxed execution** — Subprocess isolation with env var denylist (30+ dangerous vars), process group kills on Unix, 100 MB output cap.
-- **Exit classification** — v4.6 distinguishes timeouts, language-missing, and sandbox blocks from generic runtime errors so agents can react appropriately.
-- **No `shell=True`** — All subprocess calls use list-based args (`shell=False`).
-- **Secret redaction** — API keys, Bearer tokens, Stripe/Alpaca prefixes, and long base64 strings stripped before FTS5 indexing.
-- **Path traversal protection** — Skill names validated with `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`.
-- **Index size caps** — 100 KB per entry, 10 K max rows with automatic pruning.
-- **Parameterized SQL** — Zero SQL injection vectors.
-- **Snapshot budget clamped** — 256-65536 byte range enforced.
-- **Phone validation** — E.164 format enforced for iMessage delivery.
-- **Atomic config writes** — adapters write `tmp + rename` so a crashed install never leaves a half-written `~/.cursor/mcp.json`.
-- **No outbound network calls in the upgrade reminder** — purely a local timestamp comparison.
-- **No third-party runtime dependencies** — `@modelcontextprotocol/sdk`, `better-sqlite3`, `turndown`, `zod`. Nothing else.
+- **Code execution is OPT-IN and NOT sandboxed.** `ctx_execute*` runs your code in a plain subprocess with
+  **no filesystem jail, no network namespace, no seccomp/capability drop**. It refuses to run unless you set
+  `CTX_ALLOW_EXEC=1`. There is no containment when enabled — only enable it on a host you control. A real OS
+  sandbox (bubblewrap/seccomp/landlock, `sandbox-exec`, a container, or a WASM isolate) is on the roadmap; until
+  then, **treat enabling execution as granting the tool your full shell privileges.** ("sandbox_violation" is a
+  best-effort *post-hoc* stderr label, not a preventative control.)
+- **List-arg subprocess (no shell-string concat).** `ctx_deliver` uses `execFileSync` array args; skill mode
+  uses list-arg `executeArgv`; file content is passed via the environment, not interpolated into shell source.
+- **Environment allowlist.** Only a minimal set of vars (plus any you opt in via `CTX_EXEC_ENV_ALLOW`) is
+  forwarded to executed code — your other secrets/tokens are withheld. Returned output is also redaction-scanned.
+- **Secret redaction.** Multi-shape detector (API keys, Bearer, Stripe/Alpaca, AWS access+secret keys incl.
+  INI/env `key=value`, GitHub/Slack/Google tokens, JWTs, PEM private-key blocks) applied to both the index and
+  the returned payload. Still regex-based — not a guarantee; don't rely on it for high-stakes secrets.
+- **Filesystem read confinement.** `ctx_execute_file` / `ctx_index` only read inside `<data>/workspace` + the
+  current project dir (extend with `CTX_FS_ALLOW`) — not your whole home directory.
+- **SSRF protections.** `ctx_fetch_index` allows only http/https, blocks loopback/RFC1918/link-local
+  (incl. `169.254.169.254`), and re-validates the destination on **every** redirect hop.
+- **Input validation at the MCP boundary.** Every tool's args are `zod`-parsed with size/range bounds
+  (code ≤10 MB, timeout 100 ms–10 min, batch ≤100 cmds, queries ≤50, search limit 1–50).
+- **Installer defaults to deny.** Non-interactive runs register **no** platforms unless you pass an explicit
+  `--platform`; `--platform=all` requires confirmation (`--yes`); `--update` (which pulls + runs remote code)
+  requires `--allow-remote-code`; `--uninstall` actually removes the entries it added.
+- **Parameterized SQL** (no SQL injection), **E.164 phone validation**, **atomic config writes**, **index caps**
+  (100 KB/entry, 10 K rows), **snapshot budget clamp** (256–65536) — all confirmed.
+- **Dependencies are pinned exact** (`npm ci` recommended). NOTE: the MCP SDK transitively pulls a full
+  Express/Hono/cors/ajv/jose HTTP+OAuth stack (~130 packages) that this **stdio** server does not use — treat it
+  as attack surface and advisory-scan it in CI. `better-sqlite3` runs a native build on install.
 
 ---
 

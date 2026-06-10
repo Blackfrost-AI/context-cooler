@@ -18,11 +18,14 @@ const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "cc-test-"));
 process.env.CONTEXT_COOLER_HOME = HOME;
 
 const env = require(path.join(DIST, "lib", "env.js"));
+const redact = require(path.join(DIST, "lib", "redact.js"));
 const sandbox = require(path.join(DIST, "lib", "sandbox.js"));
 const execute = require(path.join(DIST, "tools", "execute.js"));
 const fetchIndex = require(path.join(DIST, "tools", "fetch-index.js"));
 const db = require(path.join(DIST, "lib", "db.js"));
 const chunker = require(path.join(DIST, "lib", "chunker.js"));
+const search = require(path.join(DIST, "tools", "search.js"));
+const filter = require(path.join(DIST, "lib", "filter.js"));
 
 // ---- CC-S4-005: path confinement ----
 test("S4: assertPathAllowed blocks paths outside allowed roots", () => {
@@ -88,6 +91,29 @@ test("SSRF: ctx_fetch_index blocks non-http(s) schemes", async () => {
   assert.equal(out.success, false);
 });
 
+// ---- CC-S6-007: redaction strength (match) + no false positives (nomatch) ----
+test("S6: redaction catches INI aws secret, JWT, GitHub token, PEM block", () => {
+  const ini = redact.redactSecrets("aws_secret_access_key=FAKEfakeFAKEfakeFAKEfakeFAKEfake12345678");
+  assert.ok(!ini.includes("FAKEfakeFAKEfakeFAKEfakeFAKEfake12345678"), "INI secret value must be redacted");
+  const jwt = redact.redactSecrets("token: eyJhbGciOiJIUzI1Niance.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w");
+  assert.ok(jwt.includes("REDACTED"), "JWT redacted");
+  const gh = redact.redactSecrets("export GH=ghp_0123456789abcdefABCDEF0123456789abcd");
+  assert.ok(!gh.includes("ghp_0123456789abcdefABCDEF0123456789abcd"), "GitHub PAT redacted");
+  const pem = redact.redactSecrets("-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----");
+  assert.ok(pem.includes("[REDACTED PRIVATE KEY]"), "PEM block redacted");
+});
+test("S6: redaction leaves benign text + JSON intact (no false positives, stays parseable)", () => {
+  const benign = '{"status":"ok","count":42,"name":"auth-service","uptime":"99.98%"}';
+  const out = redact.redactSecrets(benign);
+  assert.equal(out, benign, "benign JSON unchanged");
+  // a redacted JSON payload must still parse
+  const withSecret = '{"aws_secret_access_key":"FAKEfakeFAKEfakeFAKEfakeFAKEfake12345678","ok":true}';
+  const red = redact.redactSecrets(withSecret);
+  const parsed = JSON.parse(red);
+  assert.equal(parsed.ok, true);
+  assert.ok(!red.includes("FAKEfakeFAKEfakeFAKEfakeFAKEfake12345678"));
+});
+
 // ---- CC-E4: indexContentBatch identical rows + cached count ----
 test("E4: indexContentBatch indexes rows byte-identical to chunker output", () => {
   const sdb = db.getStatsDb();
@@ -107,5 +133,27 @@ test("E4: re-indexing same source+label dedups (no duplicate rows)", () => {
   const rows = sdb.prepare("SELECT content FROM fts_index WHERE source='s' AND label='L'").all();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].content, "v2");
+});
+
+// ---- CC-E1: compact-by-default (no full-blob echo) ----
+test("E1: compactDefault returns scalars/first-N, not the whole blob", () => {
+  assert.deepEqual(filter.compactDefault({ count: 8, positions: [1, 2, 3] }), { count: 8 });
+  assert.deepEqual(filter.compactDefault([1, 2, 3, 4, 5, 6, 7]), [1, 2, 3, 4, 5]);
+});
+
+// ---- CC-E2: query sanitize + chunk overlap ----
+test("E2: FTS query with hyphens (out-of-memory) retrieves (operator neutralized)", async () => {
+  const sdb = db.getStatsDb();
+  sdb.exec("DELETE FROM fts_index");
+  db.indexContentBatch([{ source: "inc", label: "Cache", content: "The cache layer hit an out-of-memory (OOM) condition." }]);
+  const r = JSON.parse((await search.handleSearch({ queries: ["out-of-memory cache layer"], limit: 5 })).content[0].text);
+  assert.ok(r.queries[0].results_count >= 1, "hyphenated query must retrieve");
+});
+test("E2: a fact split at the 4096-byte boundary survives in an overlap chunk", () => {
+  const filler = "padding words to consume bytes ".repeat(1);
+  let body = ""; while (body.length < 4040) body += filler;
+  const sentence = "the root cause was a null pointer dereference in the authentication handler segfault marker42.";
+  const chunks = chunker.autoChunk("# PM\n" + body + sentence + "\n" + filler.repeat(10), "pm");
+  assert.ok(chunks.some((c) => c.content.includes(sentence)), "boundary sentence must appear whole in some chunk");
   db.closeAll();
 });

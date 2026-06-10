@@ -10,6 +10,8 @@ import { loadEnv } from "./lib/env";
 import { closeAll } from "./lib/db";
 
 import { z } from "zod";
+import * as fs from "fs";
+import * as path from "path";
 import { handleExecute, executeSchema } from "./tools/execute";
 import { handleExecuteFile, executeFileSchema } from "./tools/execute-file";
 import { handleBatch, batchSchema } from "./tools/batch";
@@ -39,8 +41,21 @@ const TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
 
 loadEnv();
 
+// CC-S9-011 fix: single source of truth for the version (was hardcoded "5.0.0"
+// here vs "5.2.0" in package.json/skill.json/install.py). Read package.json at
+// startup so the handshake version can never drift again.
+const VERSION = (() => {
+  try {
+    return JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8")
+    ).version as string;
+  } catch {
+    return "0.0.0";
+  }
+})();
+
 const server = new Server(
-  { name: "context-cooler", version: "5.0.0" },
+  { name: "context-cooler", version: VERSION },
   { capabilities: { tools: {} } }
 );
 

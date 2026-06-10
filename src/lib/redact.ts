@@ -1,32 +1,61 @@
-const SECRET_PATTERNS: RegExp[] = [
-  // API keys, secrets, tokens, passwords
-  /(?:api[_-]?key|secret[_-]?key|access[_-]?token|bearer|password|auth[_-]?token)[\s:=]+["']?([A-Za-z0-9_\-/.+]{20,})["']?/gi,
-  // Stripe keys
-  /(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{20,}/g,
-  // Alpaca keys
-  /(?:PK|SK|AK)[A-Z0-9]{16,}/g,
-  // Bearer tokens in headers
-  /Bearer\s+[A-Za-z0-9_\-/.+]{20,}/gi,
-  // Generic long base64-like strings in JSON values (40+ chars)
-  /"[^"]+"\s*:\s*"([A-Za-z0-9+/=_\-]{40,})"/g,
-  // AWS keys
-  /(?:AKIA|ASIA)[A-Z0-9]{16}/g,
-  // Generic hex secrets (64+ chars, like SHA256 hashes used as secrets)
-  /(?:secret|token|key|password)\s*[:=]\s*[0-9a-f]{64,}/gi,
+// CC-S6-007 hardening: stronger, multi-shape secret redaction.
+// The previous regex set missed INI/env-style `key = value` secrets (e.g. an
+// aws_secret_access_key in ~/.aws/credentials), GitHub/Slack/Google tokens, JWTs
+// and PEM private-key blocks. It also kept the first 8 chars of every match,
+// which still leaks short secrets. This version:
+//   - redacts the VALUE of any key=value pair whose key looks secret-bearing,
+//     across JSON / INI / env / yaml shapes (quotes preserved => JSON stays valid)
+//   - redacts well-known token formats wholesale (keeps a 4-char type hint)
+//   - redacts PEM private-key blocks
+// Replacements never add/remove quotes, so a redacted JSON payload remains parseable.
+
+const REDV = "***REDACTED***";
+
+// Secret-bearing key names (covers aws_secret_access_key, client_secret, etc.)
+const KEY =
+  "(?:api[_-]?key|secret[_-]?access[_-]?key|access[_-]?key[_-]?id|access[_-]?token|" +
+  "auth[_-]?token|client[_-]?secret|private[_-]?key|secret[_-]?key|password|passwd|pwd|" +
+  "secret|token|credential|bearer)";
+
+// key <sep> value  — sep is :, =, or ": " (JSON). value = run of non-space,
+// non-quote, non-comma chars, >=8 long. We keep key+sep and redact only the value.
+const KV = new RegExp(KEY + "(\\s*[\"']?\\s*[:=]\\s*[\"']?)([^\\s\"',}{]{8,})", "gi");
+
+// Standalone token formats (redacted wholesale, 4-char type hint kept).
+const TOKENS: RegExp[] = [
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, // AWS access key id
+  /\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}\b/g, // Stripe/Alpaca
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, // GitHub PAT/OAuth
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, // Slack
+  /\bAIza[0-9A-Za-z_\-]{35}\b/g, // Google API key
+  /\beyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/g, // JWT
+  /\bBearer\s+[A-Za-z0-9_\-./+]{16,}/gi, // Bearer header
 ];
+
+// PEM private-key blocks.
+const PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
+
+function hint(match: string): string {
+  return match.length > 8 ? match.slice(0, 4) + "[REDACTED]" : "[REDACTED]";
+}
 
 export function redactSecrets(text: string): string {
   let result = text;
-  for (const pattern of SECRET_PATTERNS) {
-    // Reset lastIndex for global regexps
-    pattern.lastIndex = 0;
-    result = result.replace(pattern, (match) => {
-      // Keep the first 8 chars, redact the rest
-      if (match.length > 12) {
-        return match.slice(0, 8) + "[REDACTED]";
-      }
-      return "[REDACTED]";
-    });
+
+  // 1) PEM blocks first (largest, unambiguous)
+  result = result.replace(PEM, "[REDACTED PRIVATE KEY]");
+
+  // 2) key=value: redact only the value, keep key+separator (group1=sep, group2=value)
+  KV.lastIndex = 0;
+  result = result.replace(KV, (m, sep, value) =>
+    m.slice(0, m.length - sep.length - value.length) + sep + REDV
+  );
+
+  // 3) standalone token formats
+  for (const re of TOKENS) {
+    re.lastIndex = 0;
+    result = result.replace(re, (m) => hint(m));
   }
+
   return result;
 }
