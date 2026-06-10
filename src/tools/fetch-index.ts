@@ -60,6 +60,28 @@ async function assertUrlAllowed(rawUrl: string): Promise<void> {
   }
 }
 
+// CC-SSRF-006 hardening (TOCTOU close): pre-flight DNS validation in
+// assertUrlAllowed and the actual socket connection are two separate
+// resolutions — a hostile resolver could rebind between them. This custom
+// lookup re-checks the address AT CONNECT TIME, so the IP the socket connects to
+// is the one we validated. Passed as the http(s) `lookup` option below.
+function safeLookup(hostname: string, options: any, callback: any): void {
+  dns.lookup(hostname, options, (err: any, address: any, family: any) => {
+    if (err) return callback(err);
+    const addrs = Array.isArray(address)
+      ? address.map((a: any) => a.address)
+      : [address];
+    for (const a of addrs) {
+      if (isBlockedIp(a)) {
+        return callback(
+          new Error(`blocked host ${hostname} -> ${a} (loopback/private/link-local) at connect`)
+        );
+      }
+    }
+    callback(null, address, family);
+  });
+}
+
 // We'll try to load turndown, fall back to basic HTML stripping
 let TurndownService: any;
 try {
@@ -87,7 +109,7 @@ async function fetchUrl(
   await assertUrlAllowed(url);
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
-    const req = client.get(url, { timeout: 15000 }, (res) => {
+    const req = client.get(url, { timeout: 15000, lookup: safeLookup as any }, (res) => {
       // Follow redirects (re-validated, depth-capped)
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         if (redirectsLeft <= 0) {

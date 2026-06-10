@@ -157,3 +157,65 @@ test("E2: a fact split at the 4096-byte boundary survives in an overlap chunk", 
   assert.ok(chunks.some((c) => c.content.includes(sentence)), "boundary sentence must appear whole in some chunk");
   db.closeAll();
 });
+
+// ---- CC-S5-002: first-cut OS sandbox (fail-closed default) ----
+test("S5-sandbox: fail-closed when no OS sandbox backend is available", async () => {
+  process.env.CTX_ALLOW_EXEC = "1";
+  process.env.CTX_SANDBOX_BACKEND = "none";
+  delete process.env.CTX_ALLOW_UNSANDBOXED;
+  sandbox._resetSandboxBackend();
+  const r = await sandbox.executeCode("shell", "echo hi", 5000);
+  assert.equal(r.exitCode, 126, "must refuse when unsandboxed");
+  assert.match(r.stderr, /no OS sandbox/i);
+  delete process.env.CTX_ALLOW_EXEC;
+  delete process.env.CTX_SANDBOX_BACKEND;
+  sandbox._resetSandboxBackend();
+});
+test("S5-sandbox: CTX_ALLOW_UNSANDBOXED=1 passes the sandbox gate (explicit opt-out)", async () => {
+  process.env.CTX_ALLOW_EXEC = "1";
+  process.env.CTX_SANDBOX_BACKEND = "none";
+  process.env.CTX_ALLOW_UNSANDBOXED = "1";
+  sandbox._resetSandboxBackend();
+  const r = await sandbox.executeCode("shell", "echo hi", 5000);
+  assert.ok(!/no OS sandbox/i.test(r.stderr), "override must bypass the sandbox refusal");
+  delete process.env.CTX_ALLOW_EXEC;
+  delete process.env.CTX_SANDBOX_BACKEND;
+  delete process.env.CTX_ALLOW_UNSANDBOXED;
+  sandbox._resetSandboxBackend();
+});
+test("S5-sandbox: getSandboxBackend honors the platform/override detection", () => {
+  process.env.CTX_SANDBOX_BACKEND = "bwrap";
+  sandbox._resetSandboxBackend();
+  assert.equal(sandbox.getSandboxBackend(), "bwrap");
+  delete process.env.CTX_SANDBOX_BACKEND;
+  sandbox._resetSandboxBackend();
+});
+
+// ---- CC-S2-001: loader-influence env vars never forwarded (even if opted in) ----
+test("S2: LOADER_DENY vars are stripped even when added to CTX_EXEC_ENV_ALLOW", () => {
+  process.env.CTX_EXEC_ENV_ALLOW = "LD_PRELOAD,PYTHONPATH,NODE_OPTIONS,CC_TEST_OK";
+  process.env.LD_PRELOAD = "/evil.so";
+  process.env.PYTHONPATH = "/evil";
+  process.env.NODE_OPTIONS = "--require /evil";
+  process.env.CC_TEST_OK = "yes";
+  const e = sandbox.sanitizeEnv();
+  assert.equal(e.LD_PRELOAD, undefined, "LD_PRELOAD must never pass");
+  assert.equal(e.PYTHONPATH, undefined, "PYTHONPATH must never pass");
+  assert.equal(e.NODE_OPTIONS, undefined, "NODE_OPTIONS must never pass");
+  assert.equal(e.CC_TEST_OK, "yes", "a non-loader opt-in still works");
+  delete process.env.CTX_EXEC_ENV_ALLOW;
+  delete process.env.LD_PRELOAD;
+  delete process.env.PYTHONPATH;
+  delete process.env.NODE_OPTIONS;
+  delete process.env.CC_TEST_OK;
+});
+
+// ---- CC-S6-007: entropy catch-all for bare high-entropy secrets ----
+test("S6: entropy catch-all masks a bare secret, leaves hashes/words intact", () => {
+  const bare = redact.redactSecrets("token value Ab3xK9pLm2Qr7Ts4Vw8Yz1Bc6De0Fg5 here");
+  assert.ok(!bare.includes("Ab3xK9pLm2Qr7Ts4Vw8Yz1Bc6De0Fg5"), "bare high-entropy secret masked");
+  const hash = "d41d8cd98f00b204e9800998ecf8427e"; // md5 hex: lower+digit only -> NOT masked
+  assert.equal(redact.redactSecrets(hash), hash, "hex hash left intact");
+  const word = "internationalizationxyz"; // long word, no digit -> intact
+  assert.equal(redact.redactSecrets(word), word, "dictionary-ish word left intact");
+});

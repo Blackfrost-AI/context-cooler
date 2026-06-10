@@ -39,6 +39,38 @@ function hint(match: string): string {
   return match.length > 8 ? match.slice(0, 4) + "[REDACTED]" : "[REDACTED]";
 }
 
+// Entropy catch-all for bare, prefix-less high-entropy secrets that the keyword
+// and known-format matchers miss (e.g. a 40-char API token with no `key=`).
+// Conservative on purpose (this masks the model-visible output, so a false
+// positive only over-masks a blob): a candidate must mix UPPER + lower + digit
+// — which true secrets do but hex hashes (lower+digit) and UUIDs do not, so
+// those are left intact — AND clear a Shannon-entropy floor.
+const ENTROPY_RE = /[A-Za-z0-9_\-+/=]{24,}/g;
+const ENTROPY_MIN_BITS = 3.5;
+
+function shannonBits(s: string): number {
+  const n = s.length;
+  if (n <= 1) return 0;
+  const counts: Record<string, number> = {};
+  for (const ch of s) counts[ch] = (counts[ch] || 0) + 1;
+  let bits = 0;
+  for (const k in counts) {
+    const p = counts[k] / n;
+    bits -= p * Math.log2(p);
+  }
+  return bits;
+}
+
+function entropyMask(text: string): string {
+  ENTROPY_RE.lastIndex = 0;
+  return text.replace(ENTROPY_RE, (m) => {
+    const mixed = /[A-Z]/.test(m) && /[a-z]/.test(m) && /[0-9]/.test(m);
+    if (!mixed) return m; // skip hex hashes, UUIDs, lowercase blobs
+    if (shannonBits(m) < ENTROPY_MIN_BITS) return m;
+    return hint(m);
+  });
+}
+
 export function redactSecrets(text: string): string {
   let result = text;
 
@@ -56,6 +88,9 @@ export function redactSecrets(text: string): string {
     re.lastIndex = 0;
     result = result.replace(re, (m) => hint(m));
   }
+
+  // 4) entropy catch-all for bare high-entropy secrets the above missed
+  result = entropyMask(result);
 
   return result;
 }
