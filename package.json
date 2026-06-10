@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "node --test"
   },
   "keywords": [
     "mcp",

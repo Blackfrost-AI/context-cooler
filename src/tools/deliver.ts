@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import * as https from "https";
 import * as http from "http";
 import { loadEnv } from "../lib/env";
@@ -44,7 +44,10 @@ function sendImessage(to: string, text: string): { status: string; detail: strin
   }
 
   try {
-    execSync(`imsg send --to "${to}" --text "${text.replace(/"/g, '\\"')}"`, {
+    // CC-S2-002 fix: array args via execFileSync (no shell). The message text is
+    // passed as a single argv element, so $(...) / backticks / quotes in it are
+    // inert. Mirrors the safe Python twin (deliver.py:77).
+    execFileSync("imsg", ["send", "--to", to, "--text", text], {
       timeout: 15000,
       stdio: "ignore",
     });

@@ -3,6 +3,7 @@ import * as fs from "fs";
 import { executeCode } from "../lib/sandbox";
 import { redactSecrets } from "../lib/redact";
 import { indexContent } from "../lib/db";
+import { assertPathAllowed } from "../lib/env";
 import type { SupportedLanguage } from "../types";
 
 export const executeFileSchema = z.object({
@@ -31,6 +32,16 @@ export type ExecuteFileInput = z.infer<typeof executeFileSchema>;
 
 export async function handleExecuteFile(args: ExecuteFileInput) {
   const filePath = args.path;
+
+  // CC-S4-005 fix: confine reads to the allowlisted roots (realpath-checked).
+  const allowed = assertPathAllowed(filePath);
+  if (!allowed.ok) {
+    return {
+      content: [
+        { type: "text" as const, text: JSON.stringify({ success: false, error: allowed.reason }) },
+      ],
+    };
+  }
 
   if (!fs.existsSync(filePath)) {
     return {
@@ -64,8 +75,12 @@ export async function handleExecuteFile(args: ExecuteFileInput) {
       wrappedCode = `FILE_CONTENT = ${JSON.stringify(fileContent)}\n${args.code}`;
       break;
     case "shell":
-      // For shell, export as env var
-      wrappedCode = `export FILE_CONTENT=${JSON.stringify(fileContent)}\n${args.code}`;
+      // CC-S2-004 fix: pass FILE_CONTENT via the process environment (below),
+      // NOT by interpolating into shell source. The previous
+      // `export FILE_CONTENT=${JSON.stringify(...)}` left $() and backticks
+      // unescaped, so hostile file content executed under bash. Env values are
+      // not re-parsed by the shell, so $FILE_CONTENT is now inert.
+      wrappedCode = args.code;
       break;
     case "php":
       wrappedCode = `$FILE_CONTENT = ${JSON.stringify(fileContent)};\n${args.code}`;
@@ -80,7 +95,9 @@ export async function handleExecuteFile(args: ExecuteFileInput) {
       wrappedCode = args.code;
   }
 
-  const result = await executeCode(lang, wrappedCode, args.timeout);
+  // CC-S2-004: for shell, FILE_CONTENT travels via env (inert), not source.
+  const extraEnv = lang === "shell" ? { FILE_CONTENT: fileContent } : undefined;
+  const result = await executeCode(lang, wrappedCode, args.timeout, undefined, extraEnv);
 
   if (result.timedOut) {
     return {

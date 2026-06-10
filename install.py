@@ -225,8 +225,10 @@ def show_windows_post_install():
 # ─────────────────────────────────────────────
 
 def log(msg, level="INFO"):
-    icons = {"INFO": "→", "OK": "✅", "SKIP": "⏭️", "WARN": "⚠️", "ERR": "❌", "DRY": "🔍"}
-    print(f"  {icons.get(level, '→')} {msg}")
+    # CC-S9-011 fix: ASCII tags only. The previous emoji icons crashed the
+    # installer on a stock Windows console (cp1252 UnicodeEncodeError).
+    icons = {"INFO": "[*]", "OK": "[OK]", "SKIP": "[--]", "WARN": "[!]", "ERR": "[ERR]", "DRY": "[dry]"}
+    print(f"  {icons.get(level, '[*]')} {msg}")
 
 
 def init_databases(data_dir: Path, dry_run: bool) -> bool:
@@ -419,25 +421,29 @@ def register_mcp_server(dry_run: bool, platforms: list) -> bool:
     return all_ok
 
 
-def record_last_upgrade(dry_run: bool) -> bool:
-    """Write the current ISO timestamp to <home>/context/last-upgrade.txt.
+def record_last_upgrade(dry_run: bool, data_dir: Path) -> bool:
+    """Write the current ISO timestamp to <data_dir>/context/last-upgrade.txt.
 
-    ctx_doctor reads this file (purely locally — no network call) and
-    surfaces a reminder when the timestamp is older than 30 days.
+    CC-S9-011 fix: this path is now derived from the SAME data dir the runtime
+    uses (doctor.ts reads getDataDir()/context/last-upgrade.txt). Previously it
+    hard-coded Path.home(), which (a) ignored --data-dir / $CONTEXT_COOLER_HOME
+    so the reminder never matched, and (b) wrote the REAL home even in a scratch
+    install.
     """
+    path = data_dir / "context" / "last-upgrade.txt"
     if dry_run:
-        log(f"Would update {LAST_UPGRADE_PATH}", "DRY")
+        log(f"Would update {path}", "DRY")
         return True
 
     try:
-        LAST_UPGRADE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        LAST_UPGRADE_PATH.write_text(
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
             datetime.datetime.now(datetime.timezone.utc).isoformat() + "\n"
         )
-        log(f"Wrote upgrade timestamp to {LAST_UPGRADE_PATH}", "OK")
+        log(f"Wrote upgrade timestamp to {path}", "OK")
         return True
     except OSError as err:
-        log(f"Could not write {LAST_UPGRADE_PATH}: {err}", "WARN")
+        log(f"Could not write {path}: {err}", "WARN")
         return False
 
 
@@ -448,7 +454,12 @@ def prompt_platforms(non_interactive: bool, default_all: bool = True) -> list:
     --accept-disclaimer), falls back to default_all → SUPPORTED_PLATFORMS.
     """
     if non_interactive or not sys.stdin.isatty():
-        return SUPPORTED_PLATFORMS if default_all else ["claude-code"]
+        # CC-S8-008 fix: DEFAULT-DENY. Never silently register the RCE server into
+        # all 7 agent configs in a non-interactive/CI context. Require an explicit
+        # --platform choice; otherwise register nothing.
+        log("Non-interactive and no --platform given: registering NO platforms "
+            "(pass --platform=<id> or --platform=all to choose explicitly).", "WARN")
+        return []
 
     print("\n  Which AI coding agents should we register the MCP server with?")
     for i, p in enumerate(SUPPORTED_PLATFORMS, 1):
@@ -514,16 +525,74 @@ def confirm_install_path(default_path: Path, non_interactive: bool) -> Path:
     return Path(answer).expanduser().resolve()
 
 
-def uninstall(dry_run: bool) -> bool:
-    """Nothing to unwire — the installer only builds/registers/inits.
+SERVER_KEY = "context-cooler"
 
-    The MCP server registration lives in each agent's own config; remove it
-    there if desired. SQLite databases and scripts are left in place.
+# (config path relative to home, JSON top-level map key) for the JSON adapters.
+_JSON_CONFIGS = [
+    (".claude.json", "mcpServers"),
+    (".cursor/mcp.json", "mcpServers"),
+    (".codex/mcp_servers.json", "mcpServers"),
+    (".gemini/settings.json", "mcpServers"),
+    (".config/opencode/opencode.json", "mcp"),
+    (".pretzel-porter/agent.config.local.json", "mcpServers"),
+]
+_TOML_CONFIG = ".grok/config.toml"
+
+
+def _remove_toml_block(text: str, server_key: str) -> str:
+    header = f"[mcp_servers.{server_key}]"
+    lines = text.splitlines()
+    kept, i = [], 0
+    while i < len(lines):
+        if lines[i].strip() == header:
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("["):
+                i += 1
+            continue
+        kept.append(lines[i]); i += 1
+    return "\n".join(kept).rstrip() + "\n"
+
+
+def uninstall(dry_run: bool) -> bool:
+    """CC-S8-008 fix: actually remove the context-cooler MCP entry from each
+    agent config (previously this was a no-op that left the RCE server wired in
+    everywhere). SQLite databases + built scripts are left in place by design.
     """
-    print("\n🗑️  Context Cooler uninstall\n")
-    log("Built scripts and SQLite databases remain in place.", "SKIP")
-    log("To unregister the MCP server, remove the 'context-cooler' entry "
-        "from your AI agent's MCP config.", "SKIP")
+    print("\n  Context Cooler uninstall\n")
+    home = Path.home()
+    removed = 0
+    for rel, top_key in _JSON_CONFIGS:
+        p = home / rel
+        if not p.exists():
+            continue
+        try:
+            cfg = json.loads(p.read_text() or "{}")
+        except json.JSONDecodeError:
+            log(f"{p}: unparseable JSON, skipping", "WARN")
+            continue
+        servers = cfg.get(top_key)
+        if isinstance(servers, dict) and SERVER_KEY in servers:
+            if dry_run:
+                log(f"Would remove {SERVER_KEY} from {p} [{top_key}]", "DRY")
+            else:
+                del servers[SERVER_KEY]
+                p.write_text(json.dumps(cfg, indent=2) + "\n")
+                log(f"Removed {SERVER_KEY} from {p}", "OK")
+            removed += 1
+    # Grok TOML
+    tp = home / _TOML_CONFIG
+    if tp.exists():
+        text = tp.read_text()
+        if f"[mcp_servers.{SERVER_KEY}]" in text:
+            if dry_run:
+                log(f"Would remove [mcp_servers.{SERVER_KEY}] from {tp}", "DRY")
+            else:
+                tp.write_text(_remove_toml_block(text, SERVER_KEY))
+                log(f"Removed [mcp_servers.{SERVER_KEY}] from {tp}", "OK")
+            removed += 1
+    if removed == 0:
+        log("No context-cooler registration found in any known agent config.", "SKIP")
+    log("SQLite databases and built scripts remain in place.", "SKIP")
     return True
 
 
@@ -668,7 +737,7 @@ def main():
             lambda: register_mcp_server(args.dry_run, platforms),
         ),
         ("Initializing databases", lambda: init_databases(data_dir, args.dry_run)),
-        ("Recording upgrade timestamp", lambda: record_last_upgrade(args.dry_run)),
+        ("Recording upgrade timestamp", lambda: record_last_upgrade(args.dry_run, data_dir)),
     ]
 
     all_ok = True

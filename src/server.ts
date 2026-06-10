@@ -9,16 +9,33 @@ import {
 import { loadEnv } from "./lib/env";
 import { closeAll } from "./lib/db";
 
-import { handleExecute } from "./tools/execute";
-import { handleExecuteFile } from "./tools/execute-file";
-import { handleBatch } from "./tools/batch";
-import { handleSearch } from "./tools/search";
-import { handleIndex } from "./tools/index";
-import { handleFetchIndex } from "./tools/fetch-index";
-import { handleSession } from "./tools/session";
-import { handleStats } from "./tools/stats";
-import { handleDeliver } from "./tools/deliver";
-import { handleDoctor } from "./tools/doctor";
+import { z } from "zod";
+import { handleExecute, executeSchema } from "./tools/execute";
+import { handleExecuteFile, executeFileSchema } from "./tools/execute-file";
+import { handleBatch, batchSchema } from "./tools/batch";
+import { handleSearch, searchSchema } from "./tools/search";
+import { handleIndex, indexSchema } from "./tools/index";
+import { handleFetchIndex, fetchIndexSchema } from "./tools/fetch-index";
+import { handleSession, sessionSchema } from "./tools/session";
+import { handleStats, statsSchema } from "./tools/stats";
+import { handleDeliver, deliverSchema } from "./tools/deliver";
+import { handleDoctor, doctorSchema } from "./tools/doctor";
+
+// CC-S3-009 fix: validate every tool's args against its Zod schema at the MCP
+// boundary. Previously schemas were defined but never .parse()'d (args were
+// cast `as any`), so malformed/oversized/type-confused input reached the sinks.
+const TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  ctx_execute: executeSchema,
+  ctx_execute_file: executeFileSchema,
+  ctx_batch: batchSchema,
+  ctx_search: searchSchema,
+  ctx_index: indexSchema,
+  ctx_fetch_index: fetchIndexSchema,
+  ctx_session: sessionSchema,
+  ctx_stats: statsSchema,
+  ctx_deliver: deliverSchema,
+  ctx_doctor: doctorSchema,
+};
 
 loadEnv();
 
@@ -220,27 +237,53 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
+  // CC-S3-009 fix: enforce the schema at the boundary before dispatch.
+  const schema = TOOL_SCHEMAS[name];
+  let parsed: unknown = args;
+  if (schema) {
+    const result = schema.safeParse(args ?? {});
+    if (!result.success) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              error: "Invalid arguments",
+              issues: result.error.issues.map((i) => ({
+                path: i.path.join("."),
+                message: i.message,
+              })),
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+    parsed = result.data;
+  }
+
   switch (name) {
     case "ctx_execute":
-      return handleExecute(args as any);
+      return handleExecute(parsed as any);
     case "ctx_execute_file":
-      return handleExecuteFile(args as any);
+      return handleExecuteFile(parsed as any);
     case "ctx_batch":
-      return handleBatch(args as any);
+      return handleBatch(parsed as any);
     case "ctx_search":
-      return handleSearch(args as any);
+      return handleSearch(parsed as any);
     case "ctx_index":
-      return handleIndex(args as any);
+      return handleIndex(parsed as any);
     case "ctx_fetch_index":
-      return handleFetchIndex(args as any);
+      return handleFetchIndex(parsed as any);
     case "ctx_session":
-      return handleSession(args as any);
+      return handleSession(parsed as any);
     case "ctx_stats":
-      return handleStats(args as any);
+      return handleStats(parsed as any);
     case "ctx_deliver":
-      return handleDeliver(args as any);
+      return handleDeliver(parsed as any);
     case "ctx_doctor":
-      return handleDoctor(args as any);
+      return handleDoctor(parsed as any);
     default:
       return {
         content: [

@@ -1,8 +1,9 @@
 import { z } from "zod";
 import * as fs from "fs";
-import { indexContent } from "../lib/db";
+import { indexContentBatch } from "../lib/db";
 import { redactSecrets } from "../lib/redact";
 import { autoChunk } from "../lib/chunker";
+import { assertPathAllowed } from "../lib/env";
 
 export const indexSchema = z.object({
   content: z
@@ -30,6 +31,15 @@ export async function handleIndex(args: IndexInput) {
   let source = args.source || "manual";
 
   if (args.path) {
+    // CC-S4-005 fix: confine reads to the allowlisted roots (realpath-checked).
+    const allowed = assertPathAllowed(args.path);
+    if (!allowed.ok) {
+      return {
+        content: [
+          { type: "text" as const, text: JSON.stringify({ success: false, error: allowed.reason }) },
+        ],
+      };
+    }
     if (!fs.existsSync(args.path)) {
       return {
         content: [
@@ -66,11 +76,9 @@ export async function handleIndex(args: IndexInput) {
   const redacted = redactSecrets(text);
   const chunks = autoChunk(redacted, source);
 
-  let indexed = 0;
-  for (const chunk of chunks) {
-    indexContent(source, chunk.label, chunk.content);
-    indexed++;
-  }
+  // CC-E4 fix: one transaction for all chunks (was a COUNT scan + autocommit per chunk).
+  indexContentBatch(chunks.map((c) => ({ source, label: c.label, content: c.content })));
+  const indexed = chunks.length;
 
   return {
     content: [

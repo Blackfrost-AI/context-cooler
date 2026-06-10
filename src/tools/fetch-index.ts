@@ -1,9 +1,64 @@
 import { z } from "zod";
 import * as https from "https";
 import * as http from "http";
-import { indexContent } from "../lib/db";
+import * as dns from "dns";
+import * as net from "net";
+import { indexContentBatch } from "../lib/db";
 import { redactSecrets } from "../lib/redact";
 import { autoChunk } from "../lib/chunker";
+
+// CC-SSRF-006 fix: block requests to loopback / private / link-local addresses,
+// enforce an http(s) scheme allowlist, and re-validate on EVERY redirect hop.
+const MAX_REDIRECTS = 5;
+
+function isBlockedIp(ip: string): boolean {
+  const v = net.isIP(ip);
+  if (v === 4) {
+    const o = ip.split(".").map(Number);
+    if (o[0] === 127) return true; // loopback
+    if (o[0] === 10) return true; // RFC1918
+    if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // RFC1918
+    if (o[0] === 192 && o[1] === 168) return true; // RFC1918
+    if (o[0] === 169 && o[1] === 254) return true; // link-local incl. 169.254.169.254 (IMDS)
+    if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true; // CGNAT
+    if (o[0] === 0) return true;
+    return false;
+  }
+  if (v === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === "::1" || lower === "::") return true; // loopback / unspecified
+    if (lower.startsWith("fe80")) return true; // link-local
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA
+    if (lower.startsWith("::ffff:")) return isBlockedIp(lower.slice(7)); // v4-mapped
+    return false;
+  }
+  return true; // not a literal IP -> caller resolves DNS first
+}
+
+async function assertUrlAllowed(rawUrl: string): Promise<void> {
+  let u: URL;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    throw new Error(`invalid URL: ${rawUrl}`);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(`blocked scheme '${u.protocol}' (only http/https allowed)`);
+  }
+  const host = u.hostname;
+  if (net.isIP(host)) {
+    if (isBlockedIp(host)) throw new Error(`blocked address ${host} (loopback/private/link-local)`);
+    return;
+  }
+  // Resolve the hostname and block if ANY resolved address is internal
+  // (defends against DNS pointing at internal hosts / rebinding).
+  const addrs = await dns.promises.lookup(host, { all: true });
+  for (const a of addrs) {
+    if (isBlockedIp(a.address)) {
+      throw new Error(`blocked host ${host} -> ${a.address} (loopback/private/link-local)`);
+    }
+  }
+}
 
 // We'll try to load turndown, fall back to basic HTML stripping
 let TurndownService: any;
@@ -23,13 +78,24 @@ export const fetchIndexSchema = z.object({
 
 export type FetchIndexInput = z.infer<typeof fetchIndexSchema>;
 
-async function fetchUrl(url: string): Promise<{ body: string; contentType: string }> {
+async function fetchUrl(
+  url: string,
+  redirectsLeft: number = MAX_REDIRECTS
+): Promise<{ body: string; contentType: string }> {
+  // CC-SSRF-006 fix: validate the destination (scheme + resolved IP) on EVERY
+  // hop, not just the first request.
+  await assertUrlAllowed(url);
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
     const req = client.get(url, { timeout: 15000 }, (res) => {
-      // Follow redirects
+      // Follow redirects (re-validated, depth-capped)
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        fetchUrl(res.headers.location).then(resolve).catch(reject);
+        if (redirectsLeft <= 0) {
+          reject(new Error("too many redirects"));
+          return;
+        }
+        const next = new URL(res.headers.location, url).toString();
+        fetchUrl(next, redirectsLeft - 1).then(resolve).catch(reject);
         return;
       }
 
@@ -90,11 +156,9 @@ export async function handleFetchIndex(args: FetchIndexInput) {
     const redacted = redactSecrets(text);
     const chunks = autoChunk(redacted, source, contentType);
 
-    let indexed = 0;
-    for (const chunk of chunks) {
-      indexContent(source, chunk.label, chunk.content);
-      indexed++;
-    }
+    // CC-E4 fix: one transaction for all chunks.
+    indexContentBatch(chunks.map((c) => ({ source, label: c.label, content: c.content })));
+    const indexed = chunks.length;
 
     // Return a preview (first 3KB)
     const preview = text.slice(0, 3000);

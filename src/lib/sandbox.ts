@@ -7,27 +7,38 @@ import type { SupportedLanguage } from "../types";
 const DEFAULT_TIMEOUT = 30000;
 const MAX_OUTPUT = 100 * 1024 * 1024; // 100MB cap
 
-// Dangerous env vars to strip from subprocess
-const ENV_DENYLIST = new Set([
-  "BASH_ENV",
-  "ENV",
-  "BASH_FUNC_",
-  "CDPATH",
-  "GLOBIGNORE",
-  "PROMPT_COMMAND",
-  "NODE_OPTIONS",
-  "NODE_EXTRA_CA_CERTS",
-  "PYTHONSTARTUP",
-  "PYTHONPATH",
-  "RUBYOPT",
-  "PERL5OPT",
-  "PERL5LIB",
-  "GOFLAGS",
-  "LD_PRELOAD",
-  "LD_LIBRARY_PATH",
-  "DYLD_INSERT_LIBRARIES",
-  "DYLD_LIBRARY_PATH",
+// CC-S6-007 fix: env ALLOWLIST (was a denylist that forwarded the entire
+// environment — incl. secrets loaded from <home>/.env — to executed code).
+// Only these names are passed by default; the operator can add more with
+// CTX_EXEC_ENV_ALLOW (comma-separated). Everything else (cloud creds, tokens)
+// is withheld from the child.
+const ENV_ALLOWLIST = new Set([
+  "PATH",
+  "HOME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "SystemRoot",
+  "ComSpec",
+  "PATHEXT",
+  "CONTEXT_COOLER_HOME",
 ]);
+
+// CC-S5-001 mitigation: code execution is a privileged capability and the MCP
+// host cannot review the code before it runs. It is now OPT-IN — refused unless
+// the operator explicitly sets CTX_ALLOW_EXEC=1. (This is defense-in-depth, NOT
+// a sandbox: there is still no fs/net/seccomp jail. A real OS sandbox
+// (bubblewrap/seccomp/landlock, sandbox-exec, container, or a WASM isolate) is
+// the deeper fix tracked in the report.)
+export function isExecAllowed(): boolean {
+  return process.env.CTX_ALLOW_EXEC === "1";
+}
 
 export interface SandboxResult {
   stdout: string;
@@ -38,17 +49,17 @@ export interface SandboxResult {
 }
 
 function sanitizeEnv(): Record<string, string> {
+  // CC-S6-007 fix: allowlist, not denylist. Pass only the minimal runtime vars
+  // plus any explicitly opted-in by the operator via CTX_EXEC_ENV_ALLOW.
+  const extra = (process.env.CTX_EXEC_ENV_ALLOW || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const allow = new Set([...ENV_ALLOWLIST, ...extra]);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
-    let denied = false;
-    for (const deny of ENV_DENYLIST) {
-      if (key === deny || key.startsWith(deny)) {
-        denied = true;
-        break;
-      }
-    }
-    if (!denied) {
+    if (allow.has(key)) {
       env[key] = value;
     }
   }
@@ -59,13 +70,88 @@ export async function executeCode(
   language: SupportedLanguage,
   code: string,
   timeout: number = DEFAULT_TIMEOUT,
-  cwd?: string
+  cwd?: string,
+  extraEnv?: Record<string, string>
 ): Promise<SandboxResult> {
   const start = Date.now();
+
+  // CC-S5-001 mitigation: refuse to execute unless explicitly enabled.
+  if (!isExecAllowed()) {
+    return {
+      stdout: "",
+      stderr:
+        "code execution is disabled. Set CTX_ALLOW_EXEC=1 to enable (this tool runs UNSANDBOXED code with the agent's full privileges — enable only on an isolated host you control).",
+      exitCode: 126,
+      timedOut: false,
+      duration: Date.now() - start,
+    };
+  }
+
   const env = sanitizeEnv();
+  if (extraEnv) {
+    for (const [k, v] of Object.entries(extraEnv)) env[k] = v;
+  }
 
   const { cmd, args, cleanup } = buildCommand(language, code);
+  return runSpawn(cmd, args, { timeout, cwd, env, cleanup, start });
+}
 
+// CC-S2-003 fix: execute an explicit argv with NO shell (used by skill mode so
+// the skill `cmd` is never concatenated into a `bash -c` string).
+export async function executeArgv(
+  cmd: string,
+  argv: string[],
+  timeout: number = DEFAULT_TIMEOUT,
+  cwd?: string,
+  extraEnv?: Record<string, string>
+): Promise<SandboxResult> {
+  const start = Date.now();
+  if (!isExecAllowed()) {
+    return {
+      stdout: "",
+      stderr:
+        "code execution is disabled. Set CTX_ALLOW_EXEC=1 to enable (this tool runs UNSANDBOXED code with the agent's full privileges — enable only on an isolated host you control).",
+      exitCode: 126,
+      timedOut: false,
+      duration: Date.now() - start,
+    };
+  }
+  const env = sanitizeEnv();
+  if (extraEnv) for (const [k, v] of Object.entries(extraEnv)) env[k] = v;
+  return runSpawn(cmd, argv, { timeout, cwd, env, start });
+}
+
+// Quote-aware argument splitter (POSIX-ish). Avoids a shell entirely.
+export function splitArgs(s: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let q: '"' | "'" | null = null;
+  let has = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === q) q = null;
+      else cur += c;
+      continue;
+    }
+    if (c === '"' || c === "'") { q = c; has = true; continue; }
+    if (c === " " || c === "\t" || c === "\n") { if (has) { out.push(cur); cur = ""; has = false; } continue; }
+    cur += c; has = true;
+  }
+  if (has) out.push(cur);
+  return out;
+}
+
+interface SpawnOpts {
+  timeout: number;
+  cwd?: string;
+  env: Record<string, string>;
+  cleanup?: () => void;
+  start: number;
+}
+
+function runSpawn(cmd: string, args: string[], opts: SpawnOpts): Promise<SandboxResult> {
+  const { timeout, cwd, env, cleanup, start } = opts;
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";

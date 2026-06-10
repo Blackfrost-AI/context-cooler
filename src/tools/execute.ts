@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { executeCode, findSkillScript, executeShellCommand } from "../lib/sandbox";
+import * as path from "path";
+import { executeCode, executeArgv, splitArgs, findSkillScript, executeShellCommand } from "../lib/sandbox";
 import { filterByIntent, filterByFields } from "../lib/filter";
 import { redactSecrets } from "../lib/redact";
 import { recordRun, indexContent } from "../lib/db";
@@ -41,6 +42,10 @@ export const executeSchema = z.object({
     .string()
     .optional()
     .describe("Command to pass to the skill script (used with 'skill' parameter)"),
+  verbose: z
+    .boolean()
+    .optional()
+    .describe("Include byte-accounting metadata (raw_bytes/summary_bytes/bytes_saved/savings_pct/duration_ms) in the response. Default false (E3/E5: these are cosmetic and bust prompt-cache identity)."),
 });
 
 export type ExecuteInput = z.infer<typeof executeSchema>;
@@ -52,8 +57,8 @@ export async function handleExecute(args: ExecuteInput) {
   let language = args.language;
   let skillName: string | undefined;
   let commandStr: string | undefined;
-  let cwd: string | undefined;
 
+  let result;
   // If skill is provided, build the command to execute
   if (args.skill) {
     skillName = args.skill;
@@ -73,21 +78,22 @@ export async function handleExecute(args: ExecuteInput) {
       };
     }
 
-    // Verbose injection — get full data for filtering
-    const verboseCmd = commandStr.includes("--verbose")
-      ? commandStr
-      : `${commandStr} --verbose`;
-
-    code = `python3 "${scriptPath}" ${verboseCmd}`;
-    language = "shell";
-    cwd = scriptPath.substring(0, scriptPath.lastIndexOf("/scripts/"));
+    // CC-S2-003 fix: build argv (no shell). The skill `cmd` is split into args
+    // and passed as separate argv elements via executeArgv — it is never
+    // concatenated into a `bash -c` string. Mirrors ctx_run.py (shlex + shell=false).
+    const parts = splitArgs(commandStr);
+    if (!parts.includes("--verbose") && !parts.includes("--raw")) {
+      parts.push("--verbose"); // forced verbose to get full data for filtering
+    }
+    const skillCwd = path.dirname(path.dirname(scriptPath)); // <home>/workspace/skills/<name>
+    result = await executeArgv("python3", [scriptPath, ...parts], args.timeout, skillCwd);
+  } else {
+    result = await executeCode(
+      language as SupportedLanguage,
+      code,
+      args.timeout
+    );
   }
-
-  const result = await executeCode(
-    language as SupportedLanguage,
-    code,
-    args.timeout
-  );
 
   // v4.6: classify exit into one of five buckets so MCP clients can
   // differentiate "timed out" from "language missing" from real errors.
@@ -183,7 +189,6 @@ export async function handleExecute(args: ExecuteInput) {
     success: classified.status === "success",
     status: classified.status,
     exit_code: classified.exit_code,
-    duration_ms: classified.duration_ms,
   };
 
   if (skillName) {
@@ -197,21 +202,32 @@ export async function handleExecute(args: ExecuteInput) {
     response.output = summaryStr;
   }
 
-  response.raw_bytes = rawBytes;
-  response.summary_bytes = summaryBytes;
-  response.bytes_saved = bytesSaved;
-  response.savings_pct = Math.round(savingsPct * 10) / 10;
-  response.indexed = rawBytes > 100;
+  // E3/E5 fix: the byte-accounting block + duration_ms are cosmetic, carry the
+  // ~48-token wrapper tax every call, and bust prompt-cache byte-identity for
+  // repeated calls. Emit them only under verbose. (ctx_batch passes verbose:true
+  // so its totals still work; the canonical savings live in ctx_stats.)
+  if (args.verbose) {
+    response.duration_ms = classified.duration_ms;
+    response.raw_bytes = rawBytes;
+    response.summary_bytes = summaryBytes;
+    response.bytes_saved = bytesSaved;
+    response.savings_pct = Math.round(savingsPct * 10) / 10;
+    response.indexed = rawBytes > 100;
+  }
 
   if (result.stderr) {
     response.stderr = result.stderr.slice(0, 500);
   }
 
+  // CC-S6-007 fix: redact the model-facing payload too (previously only the FTS
+  // index was redacted; raw stdout flowed to the model unredacted). redactSecrets
+  // replaces matched runs in-place without adding/removing quotes, so the JSON
+  // stays parseable.
   return {
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify(response),
+        text: redactSecrets(JSON.stringify(response)),
       },
     ],
   };

@@ -60,6 +60,7 @@ export async function handleBatch(args: BatchInput) {
         fields: cmd.fields,
         skill: cmd.skill,
         cmd: cmd.cmd,
+        verbose: true, // E5: batch needs the byte-accounting block to compute totals
       });
 
       const text =
