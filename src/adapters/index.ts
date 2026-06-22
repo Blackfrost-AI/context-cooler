@@ -11,6 +11,7 @@ import { GeminiAdapter } from "./gemini";
 import { OpenCodeAdapter } from "./opencode";
 import { PretzelPorterAdapter } from "./pretzel-porter";
 import { GrokAdapter } from "./grok";
+import { ShadowAdapter } from "./shadow";
 import {
   AdapterContext,
   AdapterResult,
@@ -25,6 +26,7 @@ export const ADAPTERS: PlatformAdapter[] = [
   new OpenCodeAdapter(),
   new PretzelPorterAdapter(),
   new GrokAdapter(),
+  new ShadowAdapter(),
 ];
 
 export const ADAPTER_IDS = ADAPTERS.map((a) => a.id);

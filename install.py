@@ -50,6 +50,7 @@ SUPPORTED_PLATFORMS = [
     "opencode",
     "pretzel-porter",
     "grok",
+    "shadow",
 ]
 
 
