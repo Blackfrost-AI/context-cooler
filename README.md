@@ -1,8 +1,20 @@
-# Context Cooler v5.2
+<p align="center">
+  <img src="docs/banner.jpg" alt="Context Cooler — Burn fewer tokens. Ship cooler agents." width="100%">
+</p>
 
-**Eliminate token burn with the coolest MCP on the net.**
+<h1 align="center">Context Cooler</h1>
 
-*Burn fewer tokens. Ship cooler agents.*
+<p align="center">
+  <strong>Eliminate token burn with the coolest MCP on the net.</strong><br>
+  <em>Burn fewer tokens. Ship cooler agents.</em>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22d3ee"></a>
+  <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-1e3a8a">
+  <img alt="Outbound: zero callbacks" src="https://img.shields.io/badge/outbound-zero%20callbacks-0ea5e9">
+  <img alt="Version 5.4" src="https://img.shields.io/badge/version-5.4-38bdf8">
+</p>
 
 A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Grok CLI — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
 
