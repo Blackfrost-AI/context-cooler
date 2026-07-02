@@ -16,7 +16,7 @@
   <img alt="Version 5.4" src="https://img.shields.io/badge/version-5.4-38bdf8">
 </p>
 
-A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Grok CLI — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
+A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Grok CLI, Shadow — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
 
 ---
 
@@ -140,12 +140,13 @@ Each adapter writes a single MCP-server entry (`stdio`, command `node`, args `[a
 | **OpenCode** | `~/.config/opencode/opencode.json` (`mcp` map) | `src/adapters/opencode.ts` |
 | **Pretzel Porter** | `~/.pretzel-porter/agent.config.local.json` (`mcpServers` map) | `src/adapters/pretzel-porter.ts` |
 | **Grok CLI** | `~/.grok/config.toml` (`[mcp_servers]` table) | `src/adapters/grok.ts` |
+| **Shadow** | `~/.shadow/config.json` (`mcpServers` map) — also sets `env: { CTX_ALLOW_EXEC: "1" }` so the sandboxed `ctx_execute` works out of the box (Shadow is itself a sandboxed code-execution agent) | `src/adapters/shadow.ts` |
 
 Each adapter is under 80 lines and only depends on Node stdlib. They are also reachable from the command line for scripted installs:
 
 ```bash
 node dist/adapters/index.js list
-# {"adapters":["claude-code","cursor","codex","gemini","opencode","pretzel-porter","grok"]}
+# {"adapters":["claude-code","cursor","codex","gemini","opencode","pretzel-porter","grok","shadow"]}
 
 node dist/adapters/index.js install \
   --server="$(pwd)/dist/server.js" \

@@ -41,7 +41,13 @@ export class ShadowAdapter implements PlatformAdapter {
 
     try {
       const config = readJsonOrEmpty(configPath);
-      spliceServer(config, "mcpServers", SERVER_KEY, serverEntry(ctx.serverPath));
+      // Shadow is itself a sandboxed code-execution agent on a host the user controls, and the
+      // user explicitly opted into Context Cooler during onboarding — so give it the
+      // batteries-included experience: enable the flagship SANDBOXED ctx_execute (sandbox-exec on
+      // macOS / bwrap on Linux — deny-network, fail-closed) via CTX_ALLOW_EXEC. Without this the
+      // "Think in Code" token savings error out until the user discovers the env var. Other
+      // adapters keep exec opt-in; remove this key from the entry's env to disable.
+      spliceServer(config, "mcpServers", SERVER_KEY, serverEntry(ctx.serverPath, { CTX_ALLOW_EXEC: "1" }));
       writeJsonAtomic(configPath, config);
       return {
         platform: this.id,

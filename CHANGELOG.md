@@ -2,6 +2,33 @@
 
 All notable changes to Context Cooler are documented here.
 
+## [5.5.0] — 2026-07-02 — Shadow batteries-included exec + doctor exec check
+
+Focused on the Shadow CLI integration (`github.com/Blackfrost-AI/shadow-cli`), which
+offers Context Cooler during onboarding. Verified end-to-end against a live Shadow-style
+stdio MCP session (handshake, `tools/list`, and each tool). `tsc` clean, 20/20 tests green.
+
+### Changed
+- **The Shadow adapter enables the flagship sandboxed `ctx_execute` by default.**
+  `--platform=shadow` now writes `env: { CTX_ALLOW_EXEC: "1" }` into the Shadow MCP entry.
+  Shadow is itself a sandboxed code-execution agent on a host the user controls, and the
+  user opts into Context Cooler explicitly, so the "Think in Code" token savings now work
+  out of the box instead of erroring with "code execution is disabled" until the operator
+  discovers the env var. Execution still runs through the **fail-closed OS sandbox**
+  (`sandbox-exec` on macOS / `bwrap` on Linux — network-denied, jailed; validated: a
+  sandboxed network probe returns denied). Remove the key from `~/.shadow/config.json` to
+  disable. Other adapters keep exec opt-in. `serverEntry()` gained an optional, backwards-
+  compatible `env` parameter.
+
+### Added
+- **`ctx_doctor` reports code-execution status** — whether `CTX_ALLOW_EXEC` is set and which
+  sandbox backend (`sandbox-exec`/`bwrap`/none) is active. A disabled or unsandboxed install
+  was previously silent; now it is an explicit check that answers "why does ctx_execute error?".
+
+### Fixed
+- **`skill.json` version drift** — was pinned at `5.3.0` while `package.json` had moved to
+  `5.4.0`. Now synced (package.json remains the single source for the server handshake).
+
 ## [5.4.0] — 2026-06-10 — Security hardening
 
 A focused security pass. Context Cooler runs code by design, so containment and

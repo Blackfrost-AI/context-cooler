@@ -33,12 +33,15 @@ export function writeJsonAtomic(target: string, data: unknown): void {
 }
 
 // Build the standard stdio MCP server entry used by every adapter.
-export function serverEntry(serverPath: string): Record<string, unknown> {
+export function serverEntry(
+  serverPath: string,
+  env: Record<string, string> = {},
+): Record<string, unknown> {
   return {
     type: "stdio",
     command: "node",
     args: [serverPath],
-    env: {},
+    env,
   };
 }
 

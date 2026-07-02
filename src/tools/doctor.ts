@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getDataDir, getContextDir, isFtsEnabled } from "../lib/env";
 import { getStatsDb, getSessionsDb } from "../lib/db";
+import { getSandboxBackend } from "../lib/sandbox";
 
 // v4.6: where install.py records the timestamp of the most recent install
 // or `--update`. We read this LOCAL file (no network) and surface a
@@ -171,6 +172,38 @@ export async function handleDoctor(_args: DoctorInput) {
   checks.push(checkRuntime("Ruby", "ruby"));
   checks.push(checkRuntime("Go", "go"));
   checks.push(checkRuntime("Rust", "rustc"));
+
+  // Code execution — the flagship ctx_execute is gated behind CTX_ALLOW_EXEC AND a working
+  // OS sandbox. A silent "disabled" is the #1 confusion ("why does ctx_execute error?"), so
+  // surface the exact state. (The Shadow adapter sets CTX_ALLOW_EXEC=1 by default.)
+  {
+    const execOn = process.env.CTX_ALLOW_EXEC === "1";
+    const unsandboxed = process.env.CTX_ALLOW_UNSANDBOXED === "1";
+    const backend = getSandboxBackend();
+    if (!execOn) {
+      checks.push({
+        name: "Code execution",
+        status: "warn",
+        detail:
+          "disabled — set CTX_ALLOW_EXEC=1 to enable ctx_execute (runs sandboxed; enable only on a host you control)",
+      });
+    } else if (backend === "none" && !unsandboxed) {
+      checks.push({
+        name: "Code execution",
+        status: "warn",
+        detail:
+          "enabled, but no OS sandbox (bwrap/sandbox-exec) found — ctx_execute fails closed; install a backend or set CTX_ALLOW_UNSANDBOXED=1",
+      });
+    } else {
+      checks.push({
+        name: "Code execution",
+        status: "ok",
+        detail: unsandboxed
+          ? "enabled (UNSANDBOXED override — no containment)"
+          : `enabled — sandboxed via ${backend}`,
+      });
+    }
+  }
 
   // Check mcporter
   try {
