@@ -15,6 +15,21 @@ export interface Chunk {
   content: string;
 }
 
+// CC-B3 fix: chunks are keyed in the FTS index by (source,label), and the
+// dedup on insert is last-write-wins. A document with two identical headings
+// therefore produced two chunks with the same label and the earlier one was
+// silently deleted. Suffix repeats so every label in a document is distinct.
+// Deterministic in document order, so re-indexing still replaces rather than
+// duplicates.
+function disambiguateLabels(chunks: Chunk[]): Chunk[] {
+  const seen = new Map<string, number>();
+  return chunks.map((c) => {
+    const n = (seen.get(c.label) ?? 0) + 1;
+    seen.set(c.label, n);
+    return n === 1 ? c : { ...c, label: `${c.label} (#${n})` };
+  });
+}
+
 export function chunkMarkdown(text: string, source: string): Chunk[] {
   const chunks: Chunk[] = [];
   const lines = text.split("\n");
@@ -56,7 +71,7 @@ export function chunkMarkdown(text: string, source: string): Chunk[] {
     }
   }
 
-  return chunks;
+  return disambiguateLabels(chunks);
 }
 
 export function chunkPlainText(text: string, source: string): Chunk[] {
