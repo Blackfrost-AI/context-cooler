@@ -249,17 +249,17 @@ const TOOLS = [
   {
     name: "ctx_migrate",
     description:
-      "List or merge fragmented Context Cooler data directories (e.g. ~/context vs ~/.openclaw/context) into the active CONTEXT_COOLER_HOME. Default dry_run=true.",
+      "Manage the single Context Cooler brain (~/.context-cooler). list | merge | merge_all | purge_legacy. Hybrid memory lives only in the canonical home. Default dry_run=true.",
     inputSchema: {
       type: "object" as const,
       properties: {
         action: {
           type: "string",
-          enum: ["list", "merge", "merge_all"],
+          enum: ["list", "merge", "merge_all", "purge_legacy"],
           default: "list",
-          description: "list | merge | merge_all",
+          description: "list | merge | merge_all | purge_legacy",
         },
-        source: { type: "string", description: "Source context/ dir for action=merge" },
+        source: { type: "string", description: "Source context/ dir for merge/purge" },
         dry_run: { type: "boolean", default: true, description: "Preview only when true" },
       },
     },

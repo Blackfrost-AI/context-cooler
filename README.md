@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22d3ee"></a>
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-1e3a8a">
   <img alt="Outbound: zero callbacks" src="https://img.shields.io/badge/outbound-zero%20callbacks-0ea5e9">
-  <img alt="Version 6.1" src="https://img.shields.io/badge/version-6.1-38bdf8">
+  <img alt="Version 6.2" src="https://img.shields.io/badge/version-6.2-38bdf8">
 </p>
 
 A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Grok CLI, Shadow — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
@@ -40,6 +40,12 @@ The 195× reduction isn't theoretical — it's what a real morning-brief pipelin
 `ctx_execute` runs that script in a sandboxed subprocess (11 supported runtimes), captures stdout, optionally filters with an `intent` keyword, indexes the full output in FTS5 (so the agent can search it later without re-reading), and returns only the compact summary to the context window.
 
 ---
+
+## What's new in v6.2
+
+- **One brain:** default data home is **`~/.context-cooler`** (no more silent scatter into `$HOME/context`).
+- **`ctx_migrate purge_legacy`** removes leftover fragment dirs after merge.
+- Hybrid `ctx_search` stays the default memory path.
 
 ## What's new in v6.1
 

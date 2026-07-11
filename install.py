@@ -12,8 +12,8 @@ What it does (every install):
     1. Builds the standalone MCP server (npm install + tsc → dist/server.js)
     2. Registers the MCP server with the AI agents you select
        (claude-code / cursor / codex / gemini / opencode / pretzel-porter / grok)
-    3. Initializes the SQLite databases under the data dir (default: your home
-       directory, override with $CONTEXT_COOLER_HOME or --data-dir)
+    3. Initializes the SQLite databases under the data dir (default:
+       ~/.context-cooler, override with $CONTEXT_COOLER_HOME or --data-dir)
     4. Records an upgrade timestamp consulted by ctx_doctor
 """
 
@@ -33,7 +33,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "6.1.0"
+VERSION = "6.2.0"
 
 # v4.6: Local timestamp consulted by ctx_doctor for the "you haven't
 # upgraded in 30+ days" reminder. We touch this on every install/upgrade.
@@ -80,7 +80,7 @@ BY PROCEEDING YOU ACKNOWLEDGE:
      While env vars are filtered and output is capped, you are responsible
      for reviewing what code your AI agents run through it.
   2. SQLite database files are created under the data directory (default:
-     your home directory, override with --data-dir) to persist indexed data
+     ~/.context-cooler, override with --data-dir) to persist indexed data
      and session state across conversations.
   3. This software is provided "AS IS" under the MIT License, without
      warranty of any kind.
@@ -710,8 +710,13 @@ def main():
         "--data-dir",
         dest="data_dir",
         type=Path,
-        default=Path(os.environ.get("CONTEXT_COOLER_HOME", Path.home())),
-        help="Data directory for SQLite DBs (default: $CONTEXT_COOLER_HOME or your home directory, auto-created)",
+        default=Path(
+            os.environ.get(
+                "CONTEXT_COOLER_HOME",
+                str(Path.home() / ".context-cooler"),
+            )
+        ),
+        help="Data directory for SQLite DBs (default: $CONTEXT_COOLER_HOME or ~/.context-cooler, auto-created)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     parser.add_argument("--uninstall", action="store_true", help="Show uninstall notes")

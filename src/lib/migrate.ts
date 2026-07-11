@@ -19,18 +19,92 @@ export interface FragmentInfo {
   exists: boolean;
 }
 
-export function candidateContextDirs(extra: string[] = []): string[] {
+/** Legacy paths that pre-v6.2 installs scattered. Safe to purge after merge. */
+export function legacyFragmentRoots(): string[] {
   const home = os.homedir();
-  const defaults = [
+  return [
     path.join(home, "context"),
-    path.join(home, ".context-cooler", "context"),
     path.join(home, ".openclaw", "context"),
     path.join(home, "craig", "context"),
     path.join(home, ".shadow", "context"),
+    // Old "data dir = $HOME" layout also put DBs under $HOME/context only;
+    // the canonical tree is ~/.context-cooler/context and is never "legacy".
+  ];
+}
+
+export function candidateContextDirs(extra: string[] = []): string[] {
+  const home = os.homedir();
+  const defaults = [
+    path.join(home, ".context-cooler", "context"),
+    ...legacyFragmentRoots(),
   ];
   const active = getContextDir();
   const all = new Set<string>([...defaults, ...extra, active]);
   return [...all].map((p) => path.resolve(p));
+}
+
+export interface PurgeResult {
+  path: string;
+  purged: boolean;
+  skipped: boolean;
+  detail: string;
+}
+
+/**
+ * Remove a legacy fragment directory after it has been merged into the
+ * canonical home. Refuses to touch the active context dir.
+ */
+export function purgeFragment(contextDir: string, dryRun = true): PurgeResult {
+  const resolved = path.resolve(contextDir);
+  const active = path.resolve(getContextDir());
+  if (resolved === active) {
+    return {
+      path: resolved,
+      purged: false,
+      skipped: true,
+      detail: "refusing to purge the active canonical context dir",
+    };
+  }
+  const legacy = legacyFragmentRoots().map((p) => path.resolve(p));
+  if (!legacy.includes(resolved)) {
+    return {
+      path: resolved,
+      purged: false,
+      skipped: true,
+      detail: "not a known legacy fragment path — merge manually if needed",
+    };
+  }
+  if (!fs.existsSync(resolved)) {
+    return {
+      path: resolved,
+      purged: false,
+      skipped: true,
+      detail: "already gone",
+    };
+  }
+  if (dryRun) {
+    return {
+      path: resolved,
+      purged: false,
+      skipped: false,
+      detail: "dry-run — would delete this fragment directory",
+    };
+  }
+  fs.rmSync(resolved, { recursive: true, force: true });
+  return {
+    path: resolved,
+    purged: true,
+    skipped: false,
+    detail: "deleted",
+  };
+}
+
+export function purgeAllLegacyFragments(dryRun = true): {
+  active: string;
+  results: PurgeResult[];
+} {
+  const results = legacyFragmentRoots().map((p) => purgeFragment(p, dryRun));
+  return { active: getContextDir(), results };
 }
 
 function countTable(dbPath: string, table: string): number {
