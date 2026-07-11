@@ -11,7 +11,7 @@
 - [x] `ctx_session` supports listing recent events; tool responses surface data dir when relevant
 - [x] All existing tests pass + new regressions for the above (42/42)
 - [x] Version bumped to 6.0.0 across package/skill/changelog
-- [ ] Pushed to GitHub
+- [x] Pushed to GitHub
 
 ## Scope
 - **In:** `src/lib/*`, `src/tools/*`, tests, version metadata, CHANGELOG
