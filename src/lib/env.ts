@@ -5,10 +5,26 @@ import * as os from "os";
 let _dataDir: string | null = null;
 let _envLoaded = false;
 
+/**
+ * Canonical data home (v6.2+): ~/.context-cooler
+ *
+ * Pre-v6.2 defaulted to $HOME, which scattered stats.db / sessions.db across
+ * ~/context, project trees, and other agent homes. Override only with
+ * CONTEXT_COOLER_HOME when you deliberately want an isolated brain.
+ */
+export function getDefaultDataDir(): string {
+  return path.join(os.homedir(), ".context-cooler");
+}
+
 export function getDataDir(): string {
   if (_dataDir) return _dataDir;
-  _dataDir = process.env.CONTEXT_COOLER_HOME || os.homedir();
+  _dataDir = process.env.CONTEXT_COOLER_HOME || getDefaultDataDir();
   return _dataDir;
+}
+
+/** Test helper — clear cached data dir after env changes. */
+export function _resetDataDirCache(): void {
+  _dataDir = null;
 }
 
 export function getContextDir(): string {

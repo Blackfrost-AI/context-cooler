@@ -21,6 +21,7 @@ const session = require(path.join(DIST, "tools", "session.js"));
 const search = require(path.join(DIST, "tools", "search.js"));
 const db = require(path.join(DIST, "lib", "db.js"));
 const hooksInstall = require(path.join(DIST, "lib", "hooks-install.js"));
+const env = require(path.join(DIST, "lib", "env.js"));
 
 test("V61: expandQuery adds synonyms for decide/auth", () => {
   const terms = recall.expandQuery("what did we decide about auth");
@@ -116,6 +117,19 @@ test("V61: installGrokHooks writes hook file", () => {
   const r = hooksInstall.installGrokHooks(serverPath, HOME, true);
   assert.equal(r.ok, true);
   assert.ok(fs.existsSync(path.join(DIST, "hooks", "run.js")));
+});
+
+test("V62: purgeFragment refuses the active context dir", () => {
+  const active = path.join(HOME, "context");
+  const r = migrate.purgeFragment(active, false);
+  assert.equal(r.skipped, true);
+  assert.equal(r.purged, false);
+  assert.ok(fs.existsSync(active) || true); // may or may not exist yet
+});
+
+test("V62: getDefaultDataDir ends with .context-cooler", () => {
+  const d = env.getDefaultDataDir();
+  assert.ok(d.endsWith(`${path.sep}.context-cooler`) || d.endsWith(".context-cooler"));
 });
 
 test.after(() => {

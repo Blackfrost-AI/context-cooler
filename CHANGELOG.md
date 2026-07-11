@@ -2,6 +2,21 @@
 
 All notable changes to Context Cooler are documented here.
 
+## [6.2.0] — 2026-07-11 — One brain: ~/.context-cooler
+
+### Changed
+- **Canonical data home is `~/.context-cooler`** (was `$HOME`, which scattered DBs into `~/context`, project trees, and other agents). Override only with `CONTEXT_COOLER_HOME`.
+- Installer default `--data-dir` matches the runtime.
+- Hybrid recall remains the default for `ctx_search` (FTS + session events/snapshots + synonyms + recency).
+
+### Added
+- **`ctx_migrate action=purge_legacy`** — delete known leftover fragment dirs after merge (never touches the active canonical dir). `dry_run` defaults true.
+
+### Migration
+1. Ensure Grok/agents point at `CONTEXT_COOLER_HOME=~/.context-cooler` (Grok adapter does this).
+2. `ctx_migrate action=merge_all dry_run=false` if any old homes still hold unique data.
+3. `ctx_migrate action=purge_legacy dry_run=false` (or trash `~/context`, `~/.openclaw/context`, `~/craig/context` yourself).
+
 ## [6.1.0] — 2026-07-11 — Follow-ups: hooks, hybrid recall, migrate, deps
 
 Closes the remaining gaps from the deep review after v6.0.0.
