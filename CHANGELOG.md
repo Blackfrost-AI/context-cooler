@@ -2,6 +2,36 @@
 
 All notable changes to Context Cooler are documented here.
 
+## [6.0.0] — 2026-07-11 — Memory continuity that actually works
+
+**Breaking / major:** defaults and session behavior change so agents stop losing state after compaction. Token compression path is unchanged in spirit; continuity is no longer a no-op.
+
+### Why
+Deep review of a live install found: measured token burn was down, but **memory was empty** — 0 session events, one empty snapshot, a sticky session id ending in `.`, 2 KB budgets too small for coding state, and `compactDefault` stripping nested `decisions` / `next_steps` / errors from context.
+
+### Changed
+- **Default `CTX_SNAPSHOT_BUDGET` 2048 → 16384** (still clamped 256–65536).
+- **`compactDefault`** keeps high-signal nested keys in shrunk form (not scalars-only).
+- **Session id generator** is `YYYYMMDD-HHMMSS` with no trailing dot; legacy sticky ids are migrated on read.
+- **`ctx_session restore`** falls back to the latest snapshot on any session, then to recent events.
+- **Successful `ctx_execute` auto-logs** a compact event into `sessions.db` by default (`CTX_AUTO_LOG=0` to disable).
+- **Doctor** warns when events are empty and reports auto-log / budget / session id.
+- **Stats / session responses** include `data_dir` so multi-home installs are visible.
+
+### Added
+- `ctx_session` actions **`recent`** and **`new`**.
+- Env: **`CTX_AUTO_LOG`**, **`CTX_SESSION_ID`**.
+- Regression suite `test/memory-continuity.test.mjs` (session id, budget, compactDefault, restore fallback, recent, auto-log flag).
+
+### Fixed
+- Restore permanently failing when sticky session id did not match the snapshot row.
+- Session id `20260703201901.` (fractional-second slice bug).
+- Continuity loop that required manual logging nobody did — auto-log closes the loop for execute-heavy agents.
+
+### Migration
+- No DB migration required. Optional: set `CTX_SESSION_ID` to your host conversation id; set `CTX_SNAPSHOT_BUDGET=2048` if you want the old ops-only budget; set `CTX_AUTO_LOG=0` if you do not want execute auto-events.
+- Call `ctx_session action=snapshot` before compact and `restore` (or `recent`) on resume.
+
 ## [5.5.0] — 2026-07-02 — Shadow batteries-included exec + doctor exec check
 
 Focused on the Shadow CLI integration (`github.com/Blackfrost-AI/shadow-cli`), which

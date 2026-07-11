@@ -187,20 +187,101 @@ function extractScalars(obj: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
-// CC-E1 fix: the compact-by-default summary when NO intent/fields is given.
-// Previously the no-filter path re-stringified the ENTIRE (forced-verbose) blob
-// as `summary` + ~48 tokens of metadata — strictly worse than not using the tool
-// (net token-NEGATIVE in 2/3 of representative calls). The full output is still
-// indexed for ctx_search, so detail is never lost. Mirrors ctx_run.py's default
-// (top-level scalars, or first 5 keys / first 5 array items).
+// High-signal nested keys that coding agents need after compact. Scalars-only
+// compact (pre-v6) dropped decisions/next_steps/errors — the exact facts that
+// "memory trash" complaints were about. Full output is still FTS-indexed; this
+// only decides what re-enters the context window when no intent/fields is set.
+const HIGH_SIGNAL_KEYS = new Set([
+  "decisions",
+  "decision",
+  "next_steps",
+  "nextsteps",
+  "next",
+  "todos",
+  "todo",
+  "goals",
+  "goal",
+  "errors",
+  "error",
+  "error_details",
+  "failures",
+  "failure",
+  "issues",
+  "findings",
+  "recommendations",
+  "blocked",
+  "warnings",
+  "warning",
+  "memory",
+  "summary",
+  "result",
+  "results",
+  "status",
+  "message",
+  "files_changed",
+  "files",
+  "plan",
+  "action",
+  "actions",
+]);
+
+const MAX_NESTED_ITEMS = 5;
+const MAX_NESTED_BYTES = 1500;
+
+function shrinkNested(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_NESTED_ITEMS).map((item) => {
+      if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+        return extractScalars(item as Record<string, unknown>);
+      }
+      if (typeof item === "string" && item.length > 200) return item.slice(0, 200) + "…";
+      return item;
+    });
+  }
+  if (typeof value === "object" && value !== null) {
+    const scalars = extractScalars(value as Record<string, unknown>);
+    if (Object.keys(scalars).length > 0) return scalars;
+    // keep a tiny shape preview
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>).slice(0, 5)) {
+      out[k] = typeof v === "string" && v.length > 120 ? v.slice(0, 120) + "…" : v;
+    }
+    return out;
+  }
+  if (typeof value === "string" && value.length > 300) return value.slice(0, 300) + "…";
+  return value;
+}
+
+// CC-E1 + v6 memory fix: compact-by-default when NO intent/fields is given.
+// Scalars always included; high-signal nested keys kept in shrunk form so the
+// agent does not lose decisions/errors/next_steps just because it forgot to
+// pass intent. Full blob remains in FTS for ctx_search.
 export function compactDefault(data: unknown): unknown {
   if (Array.isArray(data)) return data.slice(0, 5);
   if (typeof data === "object" && data !== null) {
     const obj = data as Record<string, unknown>;
-    const scalars = extractScalars(obj);
-    if (Object.keys(scalars).length > 0) return scalars;
-    // no scalar fields — return the first 5 keys so the shape is visible
-    const out: Record<string, unknown> = {};
+    const out: Record<string, unknown> = { ...extractScalars(obj) };
+
+    let nestedBudget = MAX_NESTED_BYTES;
+    for (const [key, value] of Object.entries(obj)) {
+      if (out[key] !== undefined) continue; // already a scalar
+      if (!HIGH_SIGNAL_KEYS.has(key.toLowerCase())) continue;
+      const shrunk = shrinkNested(value);
+      const cost = Buffer.byteLength(JSON.stringify(shrunk), "utf-8");
+      if (cost > nestedBudget) {
+        // still surface the key so the agent knows it exists and can search
+        out[key] = Array.isArray(value)
+          ? `[${value.length} items — use intent/fields or ctx_search]`
+          : `[object — use intent/fields or ctx_search]`;
+        continue;
+      }
+      out[key] = shrunk;
+      nestedBudget -= cost;
+    }
+
+    if (Object.keys(out).length > 0) return out;
+
+    // no scalars and no high-signal keys — return the first 5 keys so the shape is visible
     for (const [k, v] of Object.entries(obj).slice(0, 5)) out[k] = v;
     return out;
   }

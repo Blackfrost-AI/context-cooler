@@ -1,6 +1,6 @@
 ---
 name: context-saver
-description: "Token-saving execution layer. Runs skill commands in sandboxed subprocesses where only compact summaries enter the context window. Provides session continuity via SQLite event tracking that survives conversation compaction. Supports intent-driven filtering, batched multi-skill execution, and progressive memory loading. Includes an automated installer that builds and registers the MCP server with a single command. Use this skill to wrap any data-heavy operation to reduce token consumption by 70-98%."
+description: "Token-saving execution layer (v6). Runs skill commands in sandboxed subprocesses where compact summaries enter the context window while full output is FTS-indexed. Session continuity via SQLite events + snapshots (16KB default budget, auto-log from execute, restore fallback). Supports intent filtering, batch execution, and progressive memory loading. Use for data-heavy ops; always snapshot before compact and restore/recent on resume."
 metadata: {"emoji":"🪶","requires":{"bins":["python3"],"env":[]}}
 ---
 
@@ -47,8 +47,12 @@ python3 scripts/ctx_session.py log --type "action" --priority critical --data '{
 # Build compaction snapshot (called before conversation compacts)
 python3 scripts/ctx_session.py snapshot
 
-# Restore from snapshot (called on session resume)
+# Restore from snapshot (called on session resume; falls back across sessions)
 python3 scripts/ctx_session.py restore
+
+# List recent events / rotate session id
+python3 scripts/ctx_session.py recent --limit 10
+python3 scripts/ctx_session.py new
 
 # View session stats
 python3 scripts/ctx_session.py stats

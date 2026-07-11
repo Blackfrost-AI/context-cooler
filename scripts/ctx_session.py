@@ -15,7 +15,8 @@ import time
 
 DATA_DIR = os.environ.get("CONTEXT_COOLER_HOME", os.path.expanduser("~"))
 DB_PATH = os.path.join(DATA_DIR, "context/sessions.db")
-SNAPSHOT_BUDGET = max(256, min(int(os.environ.get("CTX_SNAPSHOT_BUDGET", "2048")), 65536))
+# v6: default 16KB (was 2KB) so coding-agent continuity fits; clamp 256–65536
+SNAPSHOT_BUDGET = max(256, min(int(os.environ.get("CTX_SNAPSHOT_BUDGET", "16384")), 65536))
 
 # Priority levels with budget allocation percentages
 PRIORITIES = {
@@ -62,11 +63,29 @@ def ensure_db():
 
 
 def get_session_id():
-    """Generate or retrieve the current session ID."""
+    """Generate or retrieve the current session ID.
+
+    v6: prefer CTX_SESSION_ID; migrate legacy trailing-dot sticky ids;
+    format is always YYYYMMDD-HHMMSS (no fractional-second dot).
+    """
+    env_id = os.environ.get("CTX_SESSION_ID", "").strip()
+    if env_id:
+        return env_id
+
     session_file = os.path.join(DATA_DIR, "context/.session_id")
     if os.path.exists(session_file):
         with open(session_file, "r") as f:
-            return f.read().strip()
+            sid = f.read().strip()
+        if sid.endswith("."):
+            sid = sid.rstrip(".")
+            if "-" not in sid and len(sid) >= 14:
+                sid = f"{sid[:8]}-{sid[8:]}"
+            if not sid:
+                sid = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+            with open(session_file, "w") as f:
+                f.write(sid)
+        if sid:
+            return sid
     session_id = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     os.makedirs(os.path.dirname(session_file), exist_ok=True)
     with open(session_file, "w") as f:
@@ -183,26 +202,35 @@ def cmd_snapshot(args):
 
 
 def cmd_restore(args):
-    """Restore the most recent snapshot for the current session."""
+    """Restore the most recent snapshot (current session, then any session)."""
     conn = ensure_db()
     session_id = get_session_id()
 
     row = conn.execute(
-        "SELECT timestamp, snapshot, byte_size FROM snapshots "
+        "SELECT timestamp, snapshot, byte_size, session_id FROM snapshots "
         "WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1",
         (session_id,),
     ).fetchone()
+    fallback = False
+
+    if not row:
+        # v6: fall back to latest snapshot across all sessions
+        row = conn.execute(
+            "SELECT timestamp, snapshot, byte_size, session_id FROM snapshots "
+            "ORDER BY timestamp DESC LIMIT 1",
+        ).fetchone()
+        fallback = bool(row)
 
     if not row:
         print(json.dumps({
             "success": False,
-            "error": "No snapshot found for current session",
+            "error": "No snapshot found. Log events and call snapshot before compact.",
             "session_id": session_id,
         }))
         conn.close()
         sys.exit(1)
 
-    ts, snapshot_str, byte_size = row
+    ts, snapshot_str, byte_size, restored_sid = row
     try:
         snapshot = json.loads(snapshot_str)
     except json.JSONDecodeError:
@@ -211,12 +239,62 @@ def cmd_restore(args):
     result = {
         "success": True,
         "session_id": session_id,
+        "restored_from_session": restored_sid,
+        "fallback": fallback,
         "snapshot_time": ts,
         "snapshot_bytes": byte_size,
         "snapshot": snapshot,
     }
     print(json.dumps(result))
     conn.close()
+
+
+def cmd_recent(args):
+    """List recent session events (current session, else cross-session)."""
+    conn = ensure_db()
+    session_id = get_session_id()
+    limit = getattr(args, "limit", 10) or 10
+
+    rows = conn.execute(
+        "SELECT timestamp, session_id, event_type, priority, data FROM events "
+        "WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?",
+        (session_id, limit),
+    ).fetchall()
+    cross = False
+    if not rows:
+        rows = conn.execute(
+            "SELECT timestamp, session_id, event_type, priority, data FROM events "
+            "ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        cross = bool(rows)
+
+    events = []
+    for ts, sid, etype, prio, data in rows:
+        try:
+            d = json.loads(data)
+        except json.JSONDecodeError:
+            d = data
+        events.append({"t": ts, "session_id": sid, "type": etype, "priority": prio, "d": d})
+
+    print(json.dumps({
+        "success": True,
+        "session_id": session_id,
+        "cross_session": cross,
+        "count": len(events),
+        "events": events,
+    }))
+    conn.close()
+
+
+def cmd_new(args):
+    """Rotate to a fresh session id."""
+    session_file = os.path.join(DATA_DIR, "context/.session_id")
+    session_id = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    os.makedirs(os.path.dirname(session_file), exist_ok=True)
+    with open(session_file, "w") as f:
+        f.write(session_id)
+    print(json.dumps({"success": True, "session_id": session_id}))
 
 
 def cmd_stats(args):
@@ -287,10 +365,17 @@ def main():
     subparsers.add_parser("snapshot", help="Build a compaction snapshot")
 
     # restore subcommand
-    subparsers.add_parser("restore", help="Restore the most recent snapshot")
+    subparsers.add_parser("restore", help="Restore the most recent snapshot (falls back across sessions)")
 
     # stats subcommand
     subparsers.add_parser("stats", help="Show session statistics")
+
+    # recent subcommand
+    recent_parser = subparsers.add_parser("recent", help="List recent session events")
+    recent_parser.add_argument("--limit", type=int, default=10, help="Max events (default 10)")
+
+    # new subcommand
+    subparsers.add_parser("new", help="Rotate to a fresh session id")
 
     args = parser.parse_args()
 
@@ -303,6 +388,8 @@ def main():
         "snapshot": cmd_snapshot,
         "restore": cmd_restore,
         "stats": cmd_stats,
+        "recent": cmd_recent,
+        "new": cmd_new,
     }
     actions[args.action](args)
 

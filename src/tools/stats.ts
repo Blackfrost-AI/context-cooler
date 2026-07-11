@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getStatsDb, getSessionsDb } from "../lib/db";
-import { isFtsEnabled } from "../lib/env";
+import { isFtsEnabled, getDataDir, getSnapshotBudget } from "../lib/env";
 
 export const statsSchema = z.object({});
 
@@ -108,6 +108,8 @@ export async function handleStats(_args: StatsInput) {
         type: "text" as const,
         text: JSON.stringify({
           success: true,
+          data_dir: getDataDir(),
+          snapshot_budget: getSnapshotBudget(),
           execution: {
             total_runs: totals.total_runs,
             total_raw_bytes: totals.total_raw,

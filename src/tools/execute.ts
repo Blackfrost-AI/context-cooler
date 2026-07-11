@@ -4,9 +4,11 @@ import { executeCode, executeArgv, splitArgs, findSkillScript, executeShellComma
 import { filterByIntent, filterByFields, compactDefault } from "../lib/filter";
 import { redactSecrets } from "../lib/redact";
 import { recordRun, indexContent } from "../lib/db";
-import { loadEnv } from "../lib/env";
+import { loadEnv, isAutoLogEnabled, getDataDir } from "../lib/env";
 import { classify } from "../lib/exit-classify";
+import { tryAutoLogEvent } from "./session";
 import type { SupportedLanguage } from "../types";
+import type { Priority } from "../types";
 
 export const executeSchema = z.object({
   language: z
@@ -192,6 +194,34 @@ export async function handleExecute(args: ExecuteInput) {
     indexContent(source, label, redacted);
   }
 
+  // v6: auto-log high-signal execute results into the session event stream so
+  // snapshot/restore has something to preserve. Opt-out with CTX_AUTO_LOG=0.
+  // Only log successes with real payload; cap payload size to keep budgets sane.
+  if (
+    isAutoLogEnabled() &&
+    classified.status === "success" &&
+    summaryBytes > 40 &&
+    summaryBytes < 4000
+  ) {
+    const priority: Priority =
+      classified.exit_code !== 0
+        ? "high"
+        : summaryBytes > 800
+          ? "medium"
+          : "low";
+    const payload = {
+      source: skillName || language,
+      command: (commandStr || code).slice(0, 120),
+      intent: args.intent || null,
+      summary: isJson ? summary : String(summaryStr).slice(0, 800),
+    };
+    tryAutoLogEvent(
+      skillName ? `exec:${skillName}` : `exec:${language}`,
+      priority,
+      payload
+    );
+  }
+
   const response: Record<string, unknown> = {
     success: classified.status === "success",
     status: classified.status,
@@ -220,6 +250,7 @@ export async function handleExecute(args: ExecuteInput) {
     response.bytes_saved = bytesSaved;
     response.savings_pct = Math.round(savingsPct * 10) / 10;
     response.indexed = rawBytes > 100;
+    response.data_dir = getDataDir();
   }
 
   if (result.stderr) {

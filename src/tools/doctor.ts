@@ -2,9 +2,10 @@ import { z } from "zod";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { getDataDir, getContextDir, isFtsEnabled } from "../lib/env";
+import { getDataDir, getContextDir, isFtsEnabled, isAutoLogEnabled, getSnapshotBudget } from "../lib/env";
 import { getStatsDb, getSessionsDb } from "../lib/db";
 import { getSandboxBackend } from "../lib/sandbox";
+import { getSessionId } from "./session";
 
 // v4.6: where install.py records the timestamp of the most recent install
 // or `--update`. We read this LOCAL file (no network) and surface a
@@ -124,10 +125,18 @@ export async function handleDoctor(_args: DoctorInput) {
         cnt: number;
       }
     ).cnt;
+    const snaps = (
+      db.prepare("SELECT COUNT(*) as cnt FROM snapshots").get() as {
+        cnt: number;
+      }
+    ).cnt;
     checks.push({
       name: "sessions.db",
-      status: "ok",
-      detail: `${count} events logged`,
+      status: count === 0 ? "warn" : "ok",
+      detail:
+        count === 0
+          ? `0 events / ${snaps} snapshots — memory continuity is empty; log events or leave CTX_AUTO_LOG on (default)`
+          : `${count} events, ${snaps} snapshots (session ${getSessionId()}, budget ${getSnapshotBudget()} B)`,
     });
   } catch (err) {
     checks.push({
@@ -136,6 +145,14 @@ export async function handleDoctor(_args: DoctorInput) {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+
+  checks.push({
+    name: "Auto-log (CTX_AUTO_LOG)",
+    status: "ok",
+    detail: isAutoLogEnabled()
+      ? "on — successful ctx_execute summaries are written to sessions.db"
+      : "off (CTX_AUTO_LOG=0) — snapshots will be empty unless you ctx_session log manually",
+  });
 
   // Check skills directory
   const skillsDir = path.join(home, "workspace", "skills");

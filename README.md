@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22d3ee"></a>
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-1e3a8a">
   <img alt="Outbound: zero callbacks" src="https://img.shields.io/badge/outbound-zero%20callbacks-0ea5e9">
-  <img alt="Version 5.4" src="https://img.shields.io/badge/version-5.4-38bdf8">
+  <img alt="Version 6.0" src="https://img.shields.io/badge/version-6.0-38bdf8">
 </p>
 
 A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Grok CLI, Shadow — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
@@ -40,6 +40,18 @@ The 195× reduction isn't theoretical — it's what a real morning-brief pipelin
 `ctx_execute` runs that script in a sandboxed subprocess (11 supported runtimes), captures stdout, optionally filters with an `intent` keyword, indexes the full output in FTS5 (so the agent can search it later without re-reading), and returns only the compact summary to the context window.
 
 ---
+
+## What's new in v6.0
+
+**Major release: memory continuity that actually works.** v5 compressed well but forgot everything — empty session logs, a broken session id, 2 KB snapshots, and scalar-only `compactDefault` that stripped `decisions` / `next_steps` / errors from context.
+
+- **Session id fixed** — no more trailing `.` from ISO fractional seconds; sticky legacy ids are migrated; optional `CTX_SESSION_ID` binds to the host conversation id; `ctx_session action=new` rotates cleanly.
+- **Restore fallback** — if the current session has no snapshot, restore returns the latest snapshot from any session (and soft-falls back to recent events).
+- **Default snapshot budget 16 KB** (was 2 KB). Override with `CTX_SNAPSHOT_BUDGET` (256–65536).
+- **Smarter compact-by-default** — high-signal nested keys (`decisions`, `next_steps`, `error_details`, `todos`, …) survive in shrunk form; full output still lives in FTS5.
+- **Auto-log** — successful `ctx_execute` summaries are written to `sessions.db` by default so snapshot/restore has material. Opt out with `CTX_AUTO_LOG=0`.
+- **`ctx_session` actions `recent` and `new`** — list recent events (cross-session if empty) and start a fresh id.
+- **Doctor + stats surface data dir, session health, auto-log state, and budget.**
 
 ## What's new in v5.2
 
@@ -310,12 +322,14 @@ ctx_fetch_index(url="https://docs.example.com/api", source="API docs")
 
 ### ctx_session — Session Continuity
 
-Log events with P1-P4 priority, take snapshots before compaction, and restore state after. Snapshots fit within a strict 2 KB budget (40% P1 / 30% P2 / 20% P3 / 10% P4).
+Log events with P1-P4 priority, take snapshots before compaction, and restore state after. Snapshots fit within a **16 KB default budget** (40% P1 / 30% P2 / 20% P3 / 10% P4; override with `CTX_SNAPSHOT_BUDGET`). Successful `ctx_execute` calls auto-log summaries unless `CTX_AUTO_LOG=0`.
 
 ```
 ctx_session(action="log", event_type="decision", priority="high", data={...})
 ctx_session(action="snapshot")   # Before compaction
-ctx_session(action="restore")    # After compaction
+ctx_session(action="restore")    # After compaction (falls back across sessions)
+ctx_session(action="recent")     # Last N events (cross-session if empty)
+ctx_session(action="new")        # Rotate session id
 ctx_session(action="stats")      # Event counts and sizes
 ```
 
@@ -378,7 +392,7 @@ Smart wrapper dict handling: `{"count": 8, "positions": [...]}` → automaticall
 
 ### Layer 4: Session Continuity
 
-P1-P4 priority events survive conversation compaction via 2 KB snapshots stored in SQLite. Critical decisions and alerts are always preserved; informational queries are dropped first.
+P1-P4 priority events survive conversation compaction via priority-budgeted snapshots stored in SQLite (default 16 KB). Critical decisions and alerts are always preserved; informational queries are dropped first. Auto-log from `ctx_execute` fills the event stream so restore is not empty by default.
 
 ### Layer 5: Zero-Token Pipelines
 
@@ -475,7 +489,9 @@ WITH Context Saver v4.6:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTEXT_COOLER_HOME` | your home directory | Root data directory (dbs live under `<dir>/context/`, optional `.env`) |
-| `CTX_SNAPSHOT_BUDGET` | `2048` | Max bytes for session snapshots (256-65536) |
+| `CTX_SNAPSHOT_BUDGET` | `16384` | Max bytes for session snapshots (256-65536) |
+| `CTX_AUTO_LOG` | on (unset) | Set to `0` to disable auto-logging execute summaries into sessions.db |
+| `CTX_SESSION_ID` | sticky file | Host conversation id override (recommended for multi-session agents) |
 | `CTX_FTS_ENABLED` | `1` | Set to `0` to disable FTS5 indexing |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for ctx_deliver |
 | `TELEGRAM_CHAT_ID` | — | Default Telegram chat ID |
