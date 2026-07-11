@@ -183,13 +183,13 @@ const TOOLS = [
   {
     name: "ctx_session",
     description:
-      "Track session events (P1-P4 priority) and create compaction-survival snapshots. Actions: log, snapshot, restore, stats.",
+      "Track session events (P1-P4 priority) and create compaction-survival snapshots. Actions: log, snapshot, restore, stats, recent, new. Call snapshot before compact and restore (or recent) on resume. restore falls back to the latest snapshot across sessions if the current id has none.",
     inputSchema: {
       type: "object" as const,
       properties: {
         action: {
           type: "string",
-          enum: ["log", "snapshot", "restore", "stats"],
+          enum: ["log", "snapshot", "restore", "stats", "recent", "new"],
           description: "Session action",
         },
         event_type: { type: "string", description: "Event type for 'log' action" },
@@ -200,6 +200,8 @@ const TOOLS = [
           description: "Event priority",
         },
         data: { type: "string", description: "JSON data payload for 'log' action" },
+        limit: { type: "number", default: 10, description: "Max events for 'recent'" },
+        session_id: { type: "string", description: "Optional session id for restore/recent" },
       },
       required: ["action"],
     },

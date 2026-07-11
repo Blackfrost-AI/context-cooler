@@ -176,17 +176,17 @@ SQLite FTS5 (Full-Text Search 5) provides fast, ranked text search without exter
 
 ## Snapshot Budget Allocation
 
-The snapshot builder operates within a strict 2 KB budget (configurable via `CTX_SNAPSHOT_BUDGET`).
+The snapshot builder operates within a strict budget (default **16 KB** since v6; configurable via `CTX_SNAPSHOT_BUDGET`, clamp 256–65536).
 
 ```
-Total Budget: 2,048 bytes
-+-- P1 Critical (40%): 819 bytes
-|   +-- Deployments, system alerts, critical actions
-+-- P2 High (30%):     614 bytes
+Total Budget: 16,384 bytes (default)
++-- P1 Critical (40%): 6554 bytes
+|   +-- Deployments, system alerts, critical actions, decisions
++-- P2 High (30%):     4915 bytes
 |   +-- Config changes, threshold breaches
-+-- P3 Medium (20%):   410 bytes
-|   +-- Analysis results, routine checks
-+-- P4 Low (10%):      205 bytes
++-- P3 Medium (20%):   3277 bytes
+|   +-- Analysis results, routine checks, auto-logged executes
++-- P4 Low (10%):      1638 bytes
     +-- Informational queries, minor updates
 ```
 

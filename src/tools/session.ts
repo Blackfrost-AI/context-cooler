@@ -2,14 +2,16 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { getSessionsDb } from "../lib/db";
-import { getContextDir, getSnapshotBudget } from "../lib/env";
+import { getContextDir, getDataDir, getSnapshotBudget } from "../lib/env";
 import { PRIORITY_CONFIG } from "../types";
 import type { Priority } from "../types";
 
 export const sessionSchema = z.object({
   action: z
-    .enum(["log", "snapshot", "restore", "stats"])
-    .describe("Session action: log an event, create/restore snapshot, or view stats"),
+    .enum(["log", "snapshot", "restore", "stats", "recent", "new"])
+    .describe(
+      "Session action: log an event, create/restore snapshot, view stats, list recent events, or start a new session id"
+    ),
   event_type: z
     .string()
     .optional()
@@ -22,20 +24,70 @@ export const sessionSchema = z.object({
     .string()
     .optional()
     .describe("JSON data payload for 'log' action"),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .default(10)
+    .describe("Max events for 'recent' action"),
+  session_id: z
+    .string()
+    .optional()
+    .describe("Optional session id override for restore/recent (default: current)"),
 });
 
 export type SessionInput = z.infer<typeof sessionSchema>;
 
-function getSessionId(): string {
-  const idFile = path.join(getContextDir(), ".session_id");
+function sessionIdPath(): string {
+  return path.join(getContextDir(), ".session_id");
+}
+
+/**
+ * Build a clean session id: YYYYMMDD-HHMMSS (UTC).
+ * v6 fix: the previous ISO slice left a trailing '.' from fractional seconds
+ * ("20260711155340.") which poisoned restore lookups forever.
+ */
+export function generateSessionId(date: Date = new Date()): string {
+  const iso = date.toISOString(); // 2026-07-11T15:53:40.731Z
+  const d = iso.slice(0, 10).replace(/-/g, "");
+  const t = iso.slice(11, 19).replace(/:/g, "");
+  return `${d}-${t}`;
+}
+
+/**
+ * Resolve the active session id.
+ * Priority: CTX_SESSION_ID env (host conversation id) → sticky file → generate.
+ * If the sticky file holds a legacy trailing-dot id, migrate it in place.
+ */
+export function getSessionId(): string {
+  const fromEnv = process.env.CTX_SESSION_ID?.trim();
+  if (fromEnv) return fromEnv;
+
+  const idFile = sessionIdPath();
   if (fs.existsSync(idFile)) {
-    return fs.readFileSync(idFile, "utf-8").trim();
+    let id = fs.readFileSync(idFile, "utf-8").trim();
+    // migrate broken trailing-dot ids written by the pre-v6 generator
+    if (id.endsWith(".")) {
+      id = id.replace(/\.+$/, "");
+      if (!id.includes("-") && id.length >= 14) {
+        // 20260703201901 → 20260703-201901
+        id = `${id.slice(0, 8)}-${id.slice(8)}`;
+      }
+      if (!id) id = generateSessionId();
+      fs.writeFileSync(idFile, id);
+    }
+    if (id) return id;
   }
-  const id = new Date()
-    .toISOString()
-    .replace(/[-:T]/g, "")
-    .slice(0, 15);
+  const id = generateSessionId();
   fs.writeFileSync(idFile, id);
+  return id;
+}
+
+/** Force a new session id (for action=new). Returns the new id. */
+export function rotateSessionId(): string {
+  const id = generateSessionId();
+  fs.writeFileSync(sessionIdPath(), id);
   return id;
 }
 
@@ -69,7 +121,24 @@ function logEvent(
     event_type: eventType,
     priority: `${config.label} (${priority})`,
     byte_size: byteSize,
+    data_dir: getDataDir(),
   };
+}
+
+/**
+ * Programmatic log used by ctx_execute auto-log. Swallows errors so a session
+ * DB glitch never fails an execute call.
+ */
+export function tryAutoLogEvent(
+  eventType: string,
+  priority: Priority,
+  data: unknown
+): void {
+  try {
+    logEvent(eventType, priority, data);
+  } catch {
+    // non-fatal
+  }
 }
 
 function createSnapshot(): Record<string, unknown> {
@@ -80,7 +149,6 @@ function createSnapshot(): Record<string, unknown> {
   const events: Record<string, unknown[]> = {};
   let totalBytes = 0;
 
-  // Fill each priority bucket
   for (const [priority, config] of Object.entries(PRIORITY_CONFIG)) {
     const bucketBudget = Math.floor(budget * config.budget_pct);
     let bucketBytes = 0;
@@ -99,10 +167,16 @@ function createSnapshot(): Record<string, unknown> {
     }>;
 
     for (const row of rows) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(row.data);
+      } catch {
+        parsed = row.data;
+      }
       const entry = {
         t: row.timestamp,
         type: row.event_type,
-        d: JSON.parse(row.data),
+        d: parsed,
       };
       const entryBytes = Buffer.byteLength(JSON.stringify(entry), "utf-8");
 
@@ -141,36 +215,138 @@ function createSnapshot(): Record<string, unknown> {
       (sum, arr) => sum + (arr as unknown[]).length,
       0
     ),
+    data_dir: getDataDir(),
   };
 }
 
-function restoreSnapshot(): Record<string, unknown> {
+function restoreSnapshot(preferredSessionId?: string): Record<string, unknown> {
   const db = getSessionsDb();
-  const sessionId = getSessionId();
+  const sessionId = preferredSessionId || getSessionId();
 
-  const row = db
+  // 1) Prefer snapshot for the requested/current session
+  let row = db
     .prepare(
-      `SELECT snapshot, byte_size, timestamp FROM snapshots
+      `SELECT snapshot, byte_size, timestamp, session_id FROM snapshots
        WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1`
     )
     .get(sessionId) as
-    | { snapshot: string; byte_size: number; timestamp: string }
+    | { snapshot: string; byte_size: number; timestamp: string; session_id: string }
     | undefined;
 
+  let fallback = false;
+
+  // 2) v6: fall back to the latest snapshot on any session — sticky/broken
+  //    session ids previously made restore permanently empty.
   if (!row) {
+    row = db
+      .prepare(
+        `SELECT snapshot, byte_size, timestamp, session_id FROM snapshots
+         ORDER BY timestamp DESC LIMIT 1`
+      )
+      .get() as
+      | { snapshot: string; byte_size: number; timestamp: string; session_id: string }
+      | undefined;
+    fallback = !!row;
+  }
+
+  if (!row) {
+    // 3) No snapshots at all — synthesize a "soft restore" from recent events
+    const recent = listRecent(15, undefined);
+    if ((recent.events as unknown[]).length > 0) {
+      return {
+        success: true,
+        session_id: sessionId,
+        source: "recent_events",
+        snapshot: {
+          session_id: sessionId,
+          snapshot_time: new Date().toISOString(),
+          events: { recent: recent.events },
+        },
+        data_dir: getDataDir(),
+        note: "No snapshots found; returned recent events instead. Call action=snapshot before compact next time.",
+      };
+    }
     return {
       success: false,
-      error: "No snapshot found for current session",
+      error: "No snapshot or events found. Log events (or enable CTX_AUTO_LOG) and call snapshot before compact.",
       session_id: sessionId,
+      data_dir: getDataDir(),
     };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.snapshot);
+  } catch {
+    parsed = { raw: row.snapshot };
   }
 
   return {
     success: true,
     session_id: sessionId,
-    snapshot: JSON.parse(row.snapshot),
+    restored_from_session: row.session_id,
+    fallback,
+    snapshot: parsed,
     byte_size: row.byte_size,
     created: row.timestamp,
+    data_dir: getDataDir(),
+  };
+}
+
+function listRecent(limit: number, sessionId?: string): Record<string, unknown> {
+  const db = getSessionsDb();
+  const sid = sessionId || getSessionId();
+
+  let rows = db
+    .prepare(
+      `SELECT timestamp, session_id, event_type, priority, data, byte_size
+       FROM events WHERE session_id = ?
+       ORDER BY timestamp DESC LIMIT ?`
+    )
+    .all(sid, limit) as Array<{
+    timestamp: string;
+    session_id: string;
+    event_type: string;
+    priority: string;
+    data: string;
+    byte_size: number;
+  }>;
+
+  // If this session is empty, show latest across all sessions
+  let crossSession = false;
+  if (rows.length === 0) {
+    rows = db
+      .prepare(
+        `SELECT timestamp, session_id, event_type, priority, data, byte_size
+         FROM events ORDER BY timestamp DESC LIMIT ?`
+      )
+      .all(limit) as typeof rows;
+    crossSession = rows.length > 0;
+  }
+
+  const events = rows.map((r) => {
+    let d: unknown;
+    try {
+      d = JSON.parse(r.data);
+    } catch {
+      d = r.data;
+    }
+    return {
+      t: r.timestamp,
+      session_id: r.session_id,
+      type: r.event_type,
+      priority: r.priority,
+      d,
+    };
+  });
+
+  return {
+    success: true,
+    session_id: sid,
+    cross_session: crossSession,
+    count: events.length,
+    events,
+    data_dir: getDataDir(),
   };
 }
 
@@ -190,6 +366,10 @@ function getStats(): Record<string, unknown> {
   for (const row of eventCounts) {
     byPriority[row.priority] = row.cnt;
   }
+
+  const allEvents = (
+    db.prepare(`SELECT COUNT(*) as cnt FROM events`).get() as { cnt: number }
+  ).cnt;
 
   const totalBytes = (
     db
@@ -220,10 +400,12 @@ function getStats(): Record<string, unknown> {
     success: true,
     session_id: sessionId,
     total_events: totalEvents,
+    all_sessions_events: allEvents,
     events_by_priority: byPriority,
     total_event_bytes: totalBytes,
     snapshots_created: snapshotCount,
     snapshot_budget: getSnapshotBudget(),
+    data_dir: getDataDir(),
     ...(lastSnapshot
       ? {
           last_snapshot: {
@@ -254,11 +436,24 @@ export async function handleSession(args: SessionInput) {
       result = createSnapshot();
       break;
     case "restore":
-      result = restoreSnapshot();
+      result = restoreSnapshot(args.session_id);
       break;
     case "stats":
       result = getStats();
       break;
+    case "recent":
+      result = listRecent(args.limit ?? 10, args.session_id);
+      break;
+    case "new": {
+      const id = rotateSessionId();
+      result = {
+        success: true,
+        session_id: id,
+        message: "New session id written. Prior events remain queryable via action=recent (cross-session) or restore fallback.",
+        data_dir: getDataDir(),
+      };
+      break;
+    }
     default:
       result = { success: false, error: `Unknown action: ${args.action}` };
   }

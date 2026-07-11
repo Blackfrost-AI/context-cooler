@@ -50,9 +50,17 @@ export function loadEnv(): Record<string, string> {
   return process.env as Record<string, string>;
 }
 
+// v6: default raised from 2KB → 16KB. Coding-agent continuity (decisions,
+// next steps, file paths) cannot survive in 2KB; ops-only installs can still
+// set CTX_SNAPSHOT_BUDGET=2048. Clamp remains 256–65536.
 export function getSnapshotBudget(): number {
-  const budget = parseInt(process.env.CTX_SNAPSHOT_BUDGET || "2048", 10);
+  const budget = parseInt(process.env.CTX_SNAPSHOT_BUDGET || "16384", 10);
   return Math.min(Math.max(budget, 256), 65536);
+}
+
+/** When true (default), successful ctx_execute* calls auto-log a compact event. */
+export function isAutoLogEnabled(): boolean {
+  return process.env.CTX_AUTO_LOG !== "0";
 }
 
 export function isFtsEnabled(): boolean {
