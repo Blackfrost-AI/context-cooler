@@ -6,6 +6,8 @@ import { getDataDir, getContextDir, isFtsEnabled, isAutoLogEnabled, getSnapshotB
 import { getStatsDb, getSessionsDb } from "../lib/db";
 import { getSandboxBackend } from "../lib/sandbox";
 import { getSessionId } from "./session";
+import { listFragments } from "../lib/migrate";
+import * as os from "os";
 
 // v4.6: where install.py records the timestamp of the most recent install
 // or `--update`. We read this LOCAL file (no network) and surface a
@@ -153,6 +155,53 @@ export async function handleDoctor(_args: DoctorInput) {
       ? "on — successful ctx_execute summaries are written to sessions.db"
       : "off (CTX_AUTO_LOG=0) — snapshots will be empty unless you ctx_session log manually",
   });
+
+  // Fragmented data dirs (multiple brains problem)
+  try {
+    const frags = listFragments();
+    const active = getContextDir();
+    const others = frags.filter((f) => f.path !== active);
+    if (others.length === 0) {
+      checks.push({
+        name: "Data fragmentation",
+        status: "ok",
+        detail: `single active context dir: ${active}`,
+      });
+    } else {
+      checks.push({
+        name: "Data fragmentation",
+        status: "warn",
+        detail: `${others.length} extra data home(s): ${others
+          .map((f) => `${f.path} (fts=${f.fts_rows},events=${f.events})`)
+          .join("; ")}. Run ctx_migrate action=merge_all dry_run=false after setting CONTEXT_COOLER_HOME.`,
+      });
+    }
+  } catch (err) {
+    checks.push({
+      name: "Data fragmentation",
+      status: "warn",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Grok compact hooks
+  {
+    const hookPath = path.join(os.homedir(), ".grok", "hooks", "context-cooler.json");
+    if (fs.existsSync(hookPath)) {
+      checks.push({
+        name: "Grok compact hooks",
+        status: "ok",
+        detail: hookPath,
+      });
+    } else {
+      checks.push({
+        name: "Grok compact hooks",
+        status: "warn",
+        detail:
+          "not installed — run install.py or: node dist/adapters/index.js install-hooks --server=<dist/server.js>",
+      });
+    }
+  }
 
   // Check skills directory
   const skillsDir = path.join(home, "workspace", "skills");

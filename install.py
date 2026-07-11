@@ -33,7 +33,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-VERSION = "5.3.0"
+VERSION = "6.1.0"
 
 # v4.6: Local timestamp consulted by ctx_doctor for the "you haven't
 # upgraded in 30+ days" reminder. We touch this on every install/upgrade.
@@ -452,6 +452,44 @@ def register_mcp_server(dry_run: bool, platforms: list) -> bool:
     return all_ok
 
 
+def install_compact_hooks(dry_run: bool, data_dir: Path) -> bool:
+    """Install Grok/Claude PreCompact/PostCompact/SessionStart hooks (v6.1)."""
+    server_js = SCRIPT_DIR / "dist" / "server.js"
+    adapter_js = SCRIPT_DIR / "dist" / "adapters" / "index.js"
+    if not dry_run and (not server_js.exists() or not adapter_js.exists()):
+        log("dist not built — skipping compact hooks", "SKIP")
+        return True
+
+    import subprocess
+
+    cmd = [
+        "node",
+        str(adapter_js),
+        "install-hooks",
+        f"--server={server_js}",
+        f"--data-dir={data_dir}",
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as err:
+        log(f"install-hooks failed: {err}", "WARN")
+        return True  # non-fatal
+
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            log(f"hooks output: {line}", "WARN")
+            continue
+        level = "DRY" if dry_run else ("OK" if payload.get("ok") else "WARN")
+        log(payload.get("detail", line), level)
+    return True
+
+
 def record_last_upgrade(dry_run: bool, data_dir: Path) -> bool:
     """Write the current ISO timestamp to <data_dir>/context/last-upgrade.txt.
 
@@ -785,6 +823,7 @@ def main():
             lambda: register_mcp_server(args.dry_run, platforms),
         ),
         ("Initializing databases", lambda: init_databases(data_dir, args.dry_run)),
+        ("Installing compact hooks (Grok/Claude)", lambda: install_compact_hooks(args.dry_run, data_dir)),
         ("Recording upgrade timestamp", lambda: record_last_upgrade(args.dry_run, data_dir)),
     ]
 

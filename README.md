@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22d3ee"></a>
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-1e3a8a">
   <img alt="Outbound: zero callbacks" src="https://img.shields.io/badge/outbound-zero%20callbacks-0ea5e9">
-  <img alt="Version 6.0" src="https://img.shields.io/badge/version-6.0-38bdf8">
+  <img alt="Version 6.1" src="https://img.shields.io/badge/version-6.1-38bdf8">
 </p>
 
 A standalone Model Context Protocol (MCP) server that gives any MCP-compatible coding agent — Claude Code, Cursor, OpenAI Codex CLI, Gemini CLI, OpenCode, Grok CLI, Shadow — a sandboxed runtime, an FTS5 knowledge base, and a multi-messenger delivery channel. Built from scratch on the MCP spec. Zero outbound dependencies beyond the four pinned ones in `package.json`. MIT-licensed, audit-readable end-to-end.
@@ -40,6 +40,16 @@ The 195× reduction isn't theoretical — it's what a real morning-brief pipelin
 `ctx_execute` runs that script in a sandboxed subprocess (11 supported runtimes), captures stdout, optionally filters with an `intent` keyword, indexes the full output in FTS5 (so the agent can search it later without re-reading), and returns only the compact summary to the context window.
 
 ---
+
+## What's new in v6.1
+
+Follow-ups to the continuity work:
+
+- **Grok/Claude compact hooks** — PreCompact snapshots, PostCompact + SessionStart restore (auto-installed).
+- **Hybrid `ctx_search`** — FTS + session events/snapshots + synonyms + recency (default).
+- **`ctx_migrate`** — merge fragmented data dirs into one brain.
+- **Grok adapter** enables sandboxed exec + pins `CONTEXT_COOLER_HOME=~/.context-cooler`.
+- **Dependency audit clean** (0 known vulns in lockfile after `npm audit fix`).
 
 ## What's new in v6.0
 

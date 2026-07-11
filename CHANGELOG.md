@@ -2,6 +2,25 @@
 
 All notable changes to Context Cooler are documented here.
 
+## [6.1.0] — 2026-07-11 — Follow-ups: hooks, hybrid recall, migrate, deps
+
+Closes the remaining gaps from the deep review after v6.0.0.
+
+### Added
+- **Host compact hooks** — `dist/hooks/run.js` + installer writes Grok `PreCompact` / `PostCompact` / `SessionStart` hooks (and best-effort Claude settings merge). Binds `GROK_SESSION_ID` → `CTX_SESSION_ID`.
+- **Hybrid `ctx_search`** — default mode searches FTS5 **+ session events + snapshots**, with synonym expansion and recency boost (`mode=fts` for keyword-only).
+- **`ctx_migrate`** — list / merge fragmented data homes (`~/context`, `~/.openclaw/context`, `~/craig/context`, …) into the active `CONTEXT_COOLER_HOME`.
+- **Doctor** warns on data fragmentation and missing Grok hooks.
+- **Grok adapter** now pins `CTX_ALLOW_EXEC=1` + `CONTEXT_COOLER_HOME=~/.context-cooler` and installs hooks.
+
+### Fixed / deps
+- **`npm audit fix`** — 0 remaining known vulnerabilities in the lockfile (transitive Hono/qs/ip-address via MCP SDK).
+- Installer version string synced to **6.1.0**; `install-hooks` CLI on adapters.
+
+### Tests
+- `test/followups.test.mjs` — expandQuery, hybrid event recall, mergeFragment, hooks dry-run.
+- Full suite: **48/48** green.
+
 ## [6.0.0] — 2026-07-11 — Memory continuity that actually works
 
 **Breaking / major:** defaults and session behavior change so agents stop losing state after compaction. Token compression path is unchanged in spirit; continuity is no longer a no-op.

@@ -88,9 +88,29 @@ function runCli(argv: string[]): number {
     return 0;
   }
 
+  if (cmd === "install-hooks") {
+    const serverPath = typeof opts.server === "string" ? opts.server : "";
+    if (!serverPath) {
+      process.stderr.write("error: --server=<absolute-path> is required\n");
+      return 2;
+    }
+    const dryRun = opts["dry-run"] === true;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { installGrokHooks, installClaudeCompactHints } = require("../lib/hooks-install");
+    const dataHome =
+      (typeof opts["data-dir"] === "string" && opts["data-dir"]) ||
+      process.env.CONTEXT_COOLER_HOME ||
+      undefined;
+    const g = installGrokHooks(serverPath, dataHome, dryRun);
+    const c = installClaudeCompactHints(serverPath, dataHome, dryRun);
+    process.stdout.write(JSON.stringify(g) + "\n");
+    process.stdout.write(JSON.stringify(c) + "\n");
+    return g.ok && c.ok ? 0 : 1;
+  }
+
   if (cmd !== "install") {
     process.stderr.write(
-      "usage: node dist/adapters/index.js {install|list} [--server=PATH] [--platform=ID|all] [--dry-run]\n"
+      "usage: node dist/adapters/index.js {install|list|install-hooks} [--server=PATH] [--platform=ID|all] [--dry-run] [--data-dir=PATH]\n"
     );
     return 2;
   }

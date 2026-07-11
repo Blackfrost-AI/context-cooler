@@ -23,26 +23,36 @@ import {
   spliceTomlServer,
   writeTomlAtomic,
 } from "./util";
+import { installGrokHooks } from "../lib/hooks-install";
 
 export class GrokAdapter implements PlatformAdapter {
   readonly id = "grok";
 
   install(ctx: AdapterContext): AdapterResult {
     const configPath = path.join(homeDir(ctx.homeOverride), ".grok", "config.toml");
+    // Prefer a dedicated data home so we don't share/collide with other agents'
+    // ~/context trees. Overridable via CONTEXT_COOLER_HOME already set in env.
+    const dataHome =
+      process.env.CONTEXT_COOLER_HOME ||
+      path.join(homeDir(ctx.homeOverride), ".context-cooler");
 
     if (ctx.dryRun) {
+      const hooks = installGrokHooks(ctx.serverPath, dataHome, true);
       return {
         platform: this.id,
         configPath,
         ok: true,
-        detail: `would register ${SERVER_KEY} -> ${ctx.serverPath} in ${configPath}`,
+        detail: `would register ${SERVER_KEY} -> ${ctx.serverPath} in ${configPath} (env CTX_ALLOW_EXEC + CONTEXT_COOLER_HOME); ${hooks.detail}`,
       };
     }
 
     try {
       const existing = readTomlOrEmpty(configPath);
-      // Start from the standard entry and add Grok-specific niceties
-      const base = serverEntry(ctx.serverPath);
+      // Grok: enable sandboxed exec + pin data dir (continuity across restarts).
+      const base = serverEntry(ctx.serverPath, {
+        CTX_ALLOW_EXEC: "1",
+        CONTEXT_COOLER_HOME: dataHome,
+      });
       const entry: Record<string, unknown> = {
         ...base,
         enabled: true,
@@ -50,11 +60,13 @@ export class GrokAdapter implements PlatformAdapter {
       delete entry.type; // Grok toml uses command/args shape; type is for JSON platforms
       const newContent = spliceTomlServer(existing, SERVER_KEY, entry);
       writeTomlAtomic(configPath, newContent);
+
+      const hooks = installGrokHooks(ctx.serverPath, dataHome, false);
       return {
         platform: this.id,
         configPath,
-        ok: true,
-        detail: `registered ${SERVER_KEY} in ${configPath}`,
+        ok: hooks.ok,
+        detail: `registered ${SERVER_KEY} in ${configPath} (CTX_ALLOW_EXEC=1, CONTEXT_COOLER_HOME=${dataHome}); ${hooks.detail}`,
       };
     } catch (err) {
       return {
