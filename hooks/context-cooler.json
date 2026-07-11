@@ -1,0 +1,46 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CONTEXT_COOLER_ROOT}/dist/hooks/run.js\" pre-compact",
+            "timeout": 15,
+            "env": {
+              "CONTEXT_COOLER_HOME": "${CONTEXT_COOLER_HOME}"
+            }
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CONTEXT_COOLER_ROOT}/dist/hooks/run.js\" post-compact",
+            "timeout": 15,
+            "env": {
+              "CONTEXT_COOLER_HOME": "${CONTEXT_COOLER_HOME}"
+            }
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CONTEXT_COOLER_ROOT}/dist/hooks/run.js\" session-start",
+            "timeout": 15,
+            "env": {
+              "CONTEXT_COOLER_HOME": "${CONTEXT_COOLER_HOME}"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

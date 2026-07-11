@@ -22,6 +22,7 @@ import { handleSession, sessionSchema } from "./tools/session";
 import { handleStats, statsSchema } from "./tools/stats";
 import { handleDeliver, deliverSchema } from "./tools/deliver";
 import { handleDoctor, doctorSchema } from "./tools/doctor";
+import { handleMigrate, migrateSchema } from "./tools/migrate";
 
 // CC-S3-009 fix: validate every tool's args against its Zod schema at the MCP
 // boundary. Previously schemas were defined but never .parse()'d (args were
@@ -37,6 +38,7 @@ const TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
   ctx_stats: statsSchema,
   ctx_deliver: deliverSchema,
   ctx_doctor: doctorSchema,
+  ctx_migrate: migrateSchema,
 };
 
 loadEnv();
@@ -144,13 +146,14 @@ const TOOLS = [
   {
     name: "ctx_search",
     description:
-      "Search indexed content using FTS5 full-text search. Batch ALL questions in one call.",
+      "Hybrid recall: FTS5 + session events/snapshots with synonym expansion and recency boost. Batch ALL questions in one call. Use mode=fts for keyword-only.",
     inputSchema: {
       type: "object" as const,
       properties: {
         queries: { type: "array", items: { type: "string" }, description: "Search queries" },
         limit: { type: "number", default: 5, description: "Results per query" },
         source: { type: "string", description: "Filter to a specific source" },
+        mode: { type: "string", enum: ["hybrid", "fts"], default: "hybrid", description: "hybrid (default) or fts-only" },
       },
     },
   },
@@ -237,10 +240,28 @@ const TOOLS = [
   {
     name: "ctx_doctor",
     description:
-      "Diagnose installation: runtimes, databases, FTS5, skills, delivery backends, mcporter.",
+      "Diagnose installation: runtimes, databases, FTS5, skills, delivery backends, fragmented data dirs, hooks.",
     inputSchema: {
       type: "object" as const,
       properties: {},
+    },
+  },
+  {
+    name: "ctx_migrate",
+    description:
+      "List or merge fragmented Context Cooler data directories (e.g. ~/context vs ~/.openclaw/context) into the active CONTEXT_COOLER_HOME. Default dry_run=true.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "merge", "merge_all"],
+          default: "list",
+          description: "list | merge | merge_all",
+        },
+        source: { type: "string", description: "Source context/ dir for action=merge" },
+        dry_run: { type: "boolean", default: true, description: "Preview only when true" },
+      },
     },
   },
 ];
@@ -301,6 +322,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleDeliver(parsed as any);
     case "ctx_doctor":
       return handleDoctor(parsed as any);
+    case "ctx_migrate":
+      return handleMigrate(parsed as any);
     default:
       return {
         content: [

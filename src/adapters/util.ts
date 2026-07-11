@@ -94,12 +94,15 @@ export function spliceTomlServer(
   entry: Record<string, unknown>
 ): string {
   const sectionHeader = `[mcp_servers.${serverKey}]`;
+  // Also strip nested tables like [mcp_servers.<key>.env] left by older installs
+  const nestedPrefix = `[mcp_servers.${serverKey}.`;
   const lines = tomlText.split(/\r?\n/);
   const kept: string[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    if (line.trim() === sectionHeader) {
+    const trimmed = line.trim();
+    if (trimmed === sectionHeader || trimmed.startsWith(nestedPrefix)) {
       // skip header + all following non-[ lines (the block body)
       i++;
       while (i < lines.length && !lines[i].trim().startsWith("[")) {

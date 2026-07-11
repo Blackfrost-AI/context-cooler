@@ -1,18 +1,16 @@
 # Session goal
 
-**Goal:** Ship context-cooler v6.0.0 that fixes memory continuity failures identified in the deep review, without regressing token savings or security.
+**Goal:** Ship v6.1 follow-ups (hooks, hybrid recall, migrate, deps) and wire the local Grok install.
 
 ## Success criteria
-- [x] Session ID no longer has trailing `.`; can rotate cleanly
-- [x] `restore` falls back to latest snapshot when current session has none
-- [x] Snapshot default budget raised for coding agents (still clampable)
-- [x] `compactDefault` preserves high-signal nested keys (decisions, errors, next_steps, etc.)
-- [x] High-signal execute summaries can auto-log to session events
-- [x] `ctx_session` supports listing recent events; tool responses surface data dir when relevant
-- [x] All existing tests pass + new regressions for the above (42/42)
-- [x] Version bumped to 6.0.0 across package/skill/changelog
-- [x] Pushed to GitHub
+- [x] Host PreCompact/PostCompact/SessionStart hooks installed for Grok (+ Claude merge)
+- [x] Hybrid recall (FTS + events + recency + synonyms)
+- [x] Fragmented DB list/merge via `ctx_migrate`
+- [x] Dependency audit clean (0 vulns)
+- [x] Grok env: CTX_ALLOW_EXEC=1 + CONTEXT_COOLER_HOME=~/.context-cooler
+- [x] Local fragments merged into ~/.context-cooler
+- [x] Version 6.1.0; tests green; pushed to GitHub
 
 ## Scope
-- **In:** `src/lib/*`, `src/tools/*`, tests, version metadata, CHANGELOG
-- **Out:** Unrelated refactors, new MCP hosts, semantic embeddings
+- **In:** hooks, search/recall, migrate tool, adapters, install, lockfile, local wire-up
+- **Out:** True embedding models (hybrid is intentional light-weight)
