@@ -20,9 +20,11 @@ import {
   generateSessionId,
   handleSession,
 } from "../tools/session";
+import { ingestTranscript } from "../lib/ingest";
 
-function bindHostSession(): string {
+function bindHostSession(explicitId?: string): string {
   const host =
+    explicitId?.trim() ||
     process.env.GROK_SESSION_ID?.trim() ||
     process.env.CLAUDE_SESSION_ID?.trim() ||
     process.env.CTX_SESSION_ID?.trim();
@@ -42,20 +44,31 @@ function bindHostSession(): string {
 
 async function main(): Promise<number> {
   const action = (process.argv[2] || "").toLowerCase();
-  // Drain stdin (Grok sends event JSON) so the pipe doesn't block.
+  // Capture stdin (Grok/Claude send event JSON) so the pipe doesn't block and
+  // session-end can read transcript_path / session_id from the hook payload.
+  let stdinRaw = "";
   try {
-    await new Promise<void>((resolve) => {
-      if (process.stdin.isTTY) return resolve();
-      process.stdin.resume();
-      process.stdin.on("data", () => {});
-      process.stdin.on("end", () => resolve());
-      setTimeout(resolve, 200);
+    stdinRaw = await new Promise<string>((resolve) => {
+      if (process.stdin.isTTY) return resolve("");
+      let buf = "";
+      process.stdin.setEncoding("utf-8");
+      process.stdin.on("data", (c) => (buf += c));
+      process.stdin.on("end", () => resolve(buf));
+      setTimeout(() => resolve(buf), 500);
     });
   } catch {
     /* ignore */
   }
+  let hookInput: Record<string, any> = {};
+  try {
+    hookInput = stdinRaw ? JSON.parse(stdinRaw) : {};
+  } catch {
+    hookInput = {};
+  }
 
-  const sessionId = bindHostSession();
+  const sessionId = bindHostSession(
+    typeof hookInput.session_id === "string" ? hookInput.session_id : undefined
+  );
   const logPath = path.join(getContextDir(), "hooks.log");
   const log = (msg: string) => {
     try {
@@ -120,8 +133,24 @@ async function main(): Promise<number> {
       return 0;
     }
 
+    if (action === "session-end" || action === "stop") {
+      const transcriptPath =
+        typeof hookInput.transcript_path === "string"
+          ? hookInput.transcript_path
+          : "";
+      const r = await ingestTranscript({
+        transcriptPath,
+        sessionId,
+        cwd: typeof hookInput.cwd === "string" ? hookInput.cwd : process.cwd(),
+        reason: typeof hookInput.reason === "string" ? hookInput.reason : action,
+      });
+      log(`ingest ${JSON.stringify(r).slice(0, 300)}`);
+      process.stdout.write(JSON.stringify(r) + "\n");
+      return 0;
+    }
+
     process.stderr.write(
-      `usage: node dist/hooks/run.js {pre-compact|post-compact|session-start}\n`
+      `usage: node dist/hooks/run.js {pre-compact|post-compact|session-start|session-end}\n`
     );
     return 2;
   } catch (err) {
