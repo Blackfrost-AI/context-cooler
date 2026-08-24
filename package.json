@@ -30,7 +30,7 @@
   "comment_deps": "CC-S7-010: versions PINNED EXACT (no caret). Install with `npm ci` to honor the lockfile + verify integrity hashes. NOTE: @modelcontextprotocol/sdk transitively pulls a full express/hono/cors/ajv/jose HTTP+OAuth stack (~130 transitive pkgs) that this stdio server does not use; treat it as attack surface and advisory-scan it in CI. better-sqlite3 runs a native build (install script) on install.",
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.28.0",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "12.11.1",
     "turndown": "7.2.2",
     "zod": "3.25.76"
   },
